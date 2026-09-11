@@ -1,0 +1,217 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using BepInEx;
+using BepInEx.Configuration;
+using UnityEngine;
+
+namespace TonyMods
+{
+    [BepInPlugin("Tony.TeammateHealthBars", "Teammate Health Bars", "1.0.1")]
+    public sealed class TeammateHealthBars : BaseUnityPlugin
+    {
+        private sealed class Entry
+        {
+            public PlayerNet Player;
+            public Transform Anchor;
+            public string Name;
+            public int Hp;
+            public int Max;
+            public bool Ready;
+        }
+
+        private readonly List<Entry> entries = new List<Entry>();
+        private readonly Dictionary<ulong, Entry> cache = new Dictionary<ulong, Entry>();
+        private readonly List<ulong> removed = new List<ulong>();
+        private static readonly FieldInfo nameField = typeof(PlayerAnimTP).GetField("_nameText", BindingFlags.Instance | BindingFlags.NonPublic);
+        private ConfigEntry<bool> panel, overhead, occlusion;
+        private ConfigEntry<float> distance, scale, leftMargin;
+        private float nextRefresh;
+        private GUIStyle label, small, centered;
+        private Camera viewCamera;
+        private bool reportedError;
+
+        private void Awake()
+        {
+            panel = Config.Bind("Display", "TeamPanel", true, "Show yourself and teammates at the left-center of the screen, including solo play.");
+            overhead = Config.Bind("Display", "OverheadBars", true, "Show health below teammate nameplates.");
+            occlusion = Config.Bind("Display", "HideBehindWalls", true, "Hide overhead bars when solid geometry blocks the view.");
+            distance = Config.Bind("Display", "MaxDistance", 50f, new ConfigDescription("Overhead display distance in world units.", new AcceptableValueRange<float>(5f, 200f)));
+            scale = Config.Bind("Display", "UIScale", 1f, new ConfigDescription("UI size multiplier.", new AcceptableValueRange<float>(0.5f, 2f)));
+            leftMargin = Config.Bind("Display", "LeftMargin", 8f, new ConfigDescription("Team panel distance from the left edge.", new AcceptableValueRange<float>(0f, 200f)));
+            Logger.LogInfo("Teammate Health Bars 1.0.1 loaded (read-only client UI, panel includes self).");
+        }
+
+        private void Update()
+        {
+            if (Time.unscaledTime < nextRefresh) return;
+            nextRefresh = Time.unscaledTime + 0.1f;
+            try
+            {
+                Refresh();
+            }
+            catch (Exception ex)
+            {
+                entries.Clear();
+                cache.Clear();
+                if (!reportedError) Logger.LogError("Cannot read teammate state: " + ex);
+                reportedError = true;
+            }
+        }
+
+        private void Refresh()
+        {
+            entries.Clear();
+            PlayerManager manager = PlayerManager.Instance;
+            if (manager == null || PlayerNet.Instance == null || !PlayerNet.Instance.IsSpawned || manager.players == null)
+            {
+                cache.Clear();
+                viewCamera = null;
+                return;
+            }
+            viewCamera = PlayerCamera.Instance != null ? PlayerCamera.Instance.GetComponent<Camera>() : null;
+            if (viewCamera == null) viewCamera = Camera.main;
+            removed.Clear();
+            foreach (ulong id in cache.Keys) removed.Add(id);
+            foreach (KeyValuePair<ulong, PlayerNet> pair in manager.players)
+            {
+                PlayerNet player = pair.Value;
+                if (player == null || !player.IsSpawned) continue;
+                Entry entry;
+                if (!cache.TryGetValue(pair.Key, out entry) || entry.Player != player)
+                {
+                    entry = new Entry();
+                    entry.Player = player;
+                    cache[pair.Key] = entry;
+                }
+                removed.Remove(pair.Key);
+                if (entry.Anchor == null && player.playerAnimTP != null && nameField != null)
+                {
+                    Component name = nameField.GetValue(player.playerAnimTP) as Component;
+                    if (name != null) entry.Anchor = name.transform;
+                }
+                string nickname = player.nickname != null ? player.nickname.Value.ToString() : player.pname;
+                entry.Name = String.IsNullOrEmpty(nickname) ? "Player " + pair.Key : nickname.Replace('\n', ' ').Replace('\r', ' ');
+                // Do not present unavailable owner-only data as a real zero HP value.
+                entry.Ready = player.hp != null && player.maxHealth != null &&
+                    player.hp.CanClientRead(PlayerNet.Instance.OwnerClientId) &&
+                    player.maxHealth.CanClientRead(PlayerNet.Instance.OwnerClientId) && player.GetMaxHpValue() > 0;
+                entry.Max = entry.Ready ? player.GetMaxHpValue() : 0;
+                entry.Hp = entry.Ready ? Math.Max(0, (int)player.hp.Value) : 0;
+                entries.Add(entry);
+            }
+            foreach (ulong id in removed) cache.Remove(id);
+            entries.Sort(delegate(Entry a, Entry b)
+            {
+                bool aSelf = a.Player == PlayerNet.Instance;
+                bool bSelf = b.Player == PlayerNet.Instance;
+                if (aSelf != bSelf) return aSelf ? -1 : 1;
+                return a.Player.OwnerClientId.CompareTo(b.Player.OwnerClientId);
+            });
+        }
+
+        private void PrepareStyles()
+        {
+            if (label != null) return;
+            label = new GUIStyle(GUI.skin.label);
+            label.fontSize = 14;
+            label.richText = false;
+            label.normal.textColor = Color.white;
+            label.clipping = TextClipping.Clip;
+            small = new GUIStyle(label);
+            small.fontSize = 12;
+            centered = new GUIStyle(small);
+            centered.alignment = TextAnchor.MiddleCenter;
+        }
+
+        private void OnGUI()
+        {
+            if (Event.current.type != EventType.Repaint || entries.Count == 0 || PlayerNet.Instance == null) return;
+            PrepareStyles();
+            Matrix4x4 oldMatrix = GUI.matrix;
+            Color oldColor = GUI.color;
+            try
+            {
+                float s = Mathf.Clamp(Screen.height / 1080f, 0.65f, 2f) * scale.Value;
+                GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(s, s, 1));
+                float width = Screen.width / s;
+                float height = Screen.height / s;
+                if (panel.Value) DrawPanel(height);
+                if (overhead.Value && viewCamera != null) DrawOverhead(width, height, s);
+            }
+            finally
+            {
+                GUI.matrix = oldMatrix;
+                GUI.color = oldColor;
+            }
+        }
+
+        private void DrawPanel(float height)
+        {
+            // Compress rows for expanded multiplayer lobbies so the panel stays on screen.
+            float row = Mathf.Min(55f, (height - 48f) / entries.Count);
+            float total = row * entries.Count + 12f;
+            float x = leftMargin.Value;
+            float y = (height - total) * 0.5f;
+            Box(new Rect(x, y, 220, total), new Color(0.035f, 0.045f, 0.055f, 0.82f));
+            for (int i = 0; i < entries.Count; i++)
+            {
+                Entry e = entries[i];
+                if (e.Player == null) continue;
+                float top = y + 6 + i * row;
+                GUI.Label(new Rect(x + 9, top, 202, 21), e.Name, label);
+                DrawBar(new Rect(x + 9, top + 23, 202, Mathf.Max(5, Mathf.Min(19, row - 27))), e);
+            }
+        }
+
+        private void DrawOverhead(float width, float height, float s)
+        {
+            foreach (Entry e in entries)
+            {
+                if (e.Player == null || !e.Player.IsSpawned || e.Player.IsLocalPlayer || e.Player.IsOwner) continue;
+                Vector3 anchor = e.Anchor != null ? e.Anchor.position : e.Player.transform.position + Vector3.up * 2.2f;
+                if (Vector3.Distance(viewCamera.transform.position, anchor) > distance.Value) continue;
+                Vector3 point = viewCamera.WorldToScreenPoint(anchor);
+                if (point.z <= 0 || point.x < 0 || point.x > Screen.width || point.y < 0 || point.y > Screen.height) continue;
+                if (occlusion.Value)
+                {
+                    RaycastHit hit;
+                    if (Physics.Linecast(viewCamera.transform.position, anchor, out hit, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                    {
+                        Transform target = hit.transform;
+                        if (!target.IsChildOf(e.Player.transform) && !target.IsChildOf(PlayerNet.Instance.transform)) continue;
+                    }
+                }
+                float x = Mathf.Clamp(point.x / s - 60, 0, width - 120);
+                float y = height - point.y / s + 18;
+                if (y + 18 > height) continue;
+                DrawBar(new Rect(x, y, 120, 18), e);
+            }
+        }
+
+        private void DrawBar(Rect rect, Entry e)
+        {
+            Box(rect, new Color(0, 0, 0, 0.85f));
+            if (e.Ready)
+            {
+                float ratio = Mathf.Clamp01((float)e.Hp / e.Max);
+                Color color = new Color(0.85f, 0.18f, 0.16f);
+                Box(new Rect(rect.x + 1, rect.y + 1, (rect.width - 2) * ratio, rect.height - 2), color);
+            }
+            GUI.Label(rect, e.Ready ? e.Hp + " / " + e.Max : "-- / --", centered);
+        }
+
+        private static void Box(Rect rect, Color color)
+        {
+            GUI.color = color;
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+        }
+
+        private void OnDestroy()
+        {
+            entries.Clear();
+            cache.Clear();
+        }
+    }
+}
