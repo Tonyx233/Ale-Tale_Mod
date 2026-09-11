@@ -1,19 +1,17 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Configuration;
 using UnityEngine;
 
 namespace TonyMods
 {
-    [BepInPlugin("Tony.TeammateHealthBars", "Teammate Health Bars", "1.0.1")]
+    [BepInPlugin("Tony.TeammateHealthBars", "Teammate Health Bars", "1.0.2")]
     public sealed class TeammateHealthBars : BaseUnityPlugin
     {
         private sealed class Entry
         {
             public PlayerNet Player;
-            public Transform Anchor;
             public string Name;
             public int Hp;
             public int Max;
@@ -23,23 +21,18 @@ namespace TonyMods
         private readonly List<Entry> entries = new List<Entry>();
         private readonly Dictionary<ulong, Entry> cache = new Dictionary<ulong, Entry>();
         private readonly List<ulong> removed = new List<ulong>();
-        private static readonly FieldInfo nameField = typeof(PlayerAnimTP).GetField("_nameText", BindingFlags.Instance | BindingFlags.NonPublic);
-        private ConfigEntry<bool> panel, overhead, occlusion;
-        private ConfigEntry<float> distance, scale, leftMargin;
+        private ConfigEntry<bool> panel;
+        private ConfigEntry<float> scale, leftMargin;
         private float nextRefresh;
         private GUIStyle label, small, centered;
-        private Camera viewCamera;
         private bool reportedError;
 
         private void Awake()
         {
             panel = Config.Bind("Display", "TeamPanel", true, "Show yourself and teammates at the left-center of the screen, including solo play.");
-            overhead = Config.Bind("Display", "OverheadBars", true, "Show health below teammate nameplates.");
-            occlusion = Config.Bind("Display", "HideBehindWalls", true, "Hide overhead bars when solid geometry blocks the view.");
-            distance = Config.Bind("Display", "MaxDistance", 50f, new ConfigDescription("Overhead display distance in world units.", new AcceptableValueRange<float>(5f, 200f)));
             scale = Config.Bind("Display", "UIScale", 1f, new ConfigDescription("UI size multiplier.", new AcceptableValueRange<float>(0.5f, 2f)));
             leftMargin = Config.Bind("Display", "LeftMargin", 8f, new ConfigDescription("Team panel distance from the left edge.", new AcceptableValueRange<float>(0f, 200f)));
-            Logger.LogInfo("Teammate Health Bars 1.0.1 loaded (read-only client UI, panel includes self).");
+            Logger.LogInfo("Teammate Health Bars 1.0.2 loaded (read-only client UI, panel includes self).");
         }
 
         private void Update()
@@ -66,11 +59,8 @@ namespace TonyMods
             if (manager == null || PlayerNet.Instance == null || !PlayerNet.Instance.IsSpawned || manager.players == null)
             {
                 cache.Clear();
-                viewCamera = null;
                 return;
             }
-            viewCamera = PlayerCamera.Instance != null ? PlayerCamera.Instance.GetComponent<Camera>() : null;
-            if (viewCamera == null) viewCamera = Camera.main;
             removed.Clear();
             foreach (ulong id in cache.Keys) removed.Add(id);
             foreach (KeyValuePair<ulong, PlayerNet> pair in manager.players)
@@ -85,11 +75,6 @@ namespace TonyMods
                     cache[pair.Key] = entry;
                 }
                 removed.Remove(pair.Key);
-                if (entry.Anchor == null && player.playerAnimTP != null && nameField != null)
-                {
-                    Component name = nameField.GetValue(player.playerAnimTP) as Component;
-                    if (name != null) entry.Anchor = name.transform;
-                }
                 string nickname = player.nickname != null ? player.nickname.Value.ToString() : player.pname;
                 entry.Name = String.IsNullOrEmpty(nickname) ? "Player " + pair.Key : nickname.Replace('\n', ' ').Replace('\r', ' ');
                 // Do not present unavailable owner-only data as a real zero HP value.
@@ -134,10 +119,8 @@ namespace TonyMods
             {
                 float s = Mathf.Clamp(Screen.height / 1080f, 0.65f, 2f) * scale.Value;
                 GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(s, s, 1));
-                float width = Screen.width / s;
                 float height = Screen.height / s;
                 if (panel.Value) DrawPanel(height);
-                if (overhead.Value && viewCamera != null) DrawOverhead(width, height, s);
             }
             finally
             {
@@ -161,31 +144,6 @@ namespace TonyMods
                 float top = y + 6 + i * row;
                 GUI.Label(new Rect(x + 9, top, 202, 21), e.Name, label);
                 DrawBar(new Rect(x + 9, top + 23, 202, Mathf.Max(5, Mathf.Min(19, row - 27))), e);
-            }
-        }
-
-        private void DrawOverhead(float width, float height, float s)
-        {
-            foreach (Entry e in entries)
-            {
-                if (e.Player == null || !e.Player.IsSpawned || e.Player.IsLocalPlayer || e.Player.IsOwner) continue;
-                Vector3 anchor = e.Anchor != null ? e.Anchor.position : e.Player.transform.position + Vector3.up * 2.2f;
-                if (Vector3.Distance(viewCamera.transform.position, anchor) > distance.Value) continue;
-                Vector3 point = viewCamera.WorldToScreenPoint(anchor);
-                if (point.z <= 0 || point.x < 0 || point.x > Screen.width || point.y < 0 || point.y > Screen.height) continue;
-                if (occlusion.Value)
-                {
-                    RaycastHit hit;
-                    if (Physics.Linecast(viewCamera.transform.position, anchor, out hit, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
-                    {
-                        Transform target = hit.transform;
-                        if (!target.IsChildOf(e.Player.transform) && !target.IsChildOf(PlayerNet.Instance.transform)) continue;
-                    }
-                }
-                float x = Mathf.Clamp(point.x / s - 60, 0, width - 120);
-                float y = height - point.y / s + 18;
-                if (y + 18 > height) continue;
-                DrawBar(new Rect(x, y, 120, 18), e);
             }
         }
 

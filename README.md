@@ -4,9 +4,8 @@ Ale and Tale Tavern 的個人 BepInEx 模組。
 
 ## Teammate Health Bars
 
-- 頭頂紅色血條，顯示隊友 HP。
 - 左側中央隊伍面板，包含自己與隊友的名字、HP，單人也會顯示。
-- 可調整大小、距離及遮擋顯示。
+- 固定紅色血條，可調整面板大小與左邊距。
 
 [使用說明與設定](TeammateHealthBars/README.md)
 
