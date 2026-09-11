@@ -12,7 +12,7 @@
 
 DLL 位於 `BepInEx/plugins/Tony.TeammateHealthBars/Tony.TeammateHealthBars.dll`。
 透過原本能載入 BepInEx 的方式啟動遊戲；已啟動則需退出後重新啟動。
-載入後 log 應有 `Teammate Health Bars 1.0.2 loaded (read-only client UI, panel includes self).`。
+整合版載入後 log 會顯示 `Tony Ale & Tale Mods 0.2.0 loaded (health panel + YouTube jukebox).`。
 首次載入自動產生 `BepInEx/config/Tony.TeammateHealthBars.cfg`。
 
 ## 設定
@@ -28,8 +28,8 @@ DLL 位於 `BepInEx/plugins/Tony.TeammateHealthBars/Tony.TeammateHealthBars.dll`
 ## 編譯
 
 在此目錄執行 `./build.ps1`，或使用 `./build.ps1 -GamePath 'D:\SteamLibrary\steamapps\common\Ale and Tale Tavern'` 指定遊戲路徑。使用 Windows 內建 .NET Framework C# compiler，
-引用本機遊戲 assemblies，不需要下載 NuGet 套件。
-輸出至 `bin/Tony.TeammateHealthBars.dll`，編譯腳本不會自行覆蓋已安裝 DLL。
+引用本機遊戲 assemblies，整合版會下載 WebView2 SDK，詳見根目錄 README。
+輸出至 repository 根目錄的 `bin/Tony.TeammateHealthBars.dll`，編譯腳本不會自行覆蓋已安裝 DLL。
 
 ## 驗證狀態與待測
 

@@ -6,3 +6,4 @@
 *.log
 .env
 .env.*
+.packages/
