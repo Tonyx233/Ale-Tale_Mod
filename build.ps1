@@ -23,6 +23,6 @@ $refs += '/reference:'+(Join-Path $GamePath 'BepInEx\core\0Harmony.dll')
 Copy-Item (Join-Path $package 'LICENSE.txt') (Join-Path $hostDir 'WebView2-LICENSE.txt') -Force
 Copy-Item (Join-Path $package 'NOTICE.txt') (Join-Path $hostDir 'WebView2-NOTICE.txt') -Force
 $resources = @(Get-ChildItem $hostDir -File | Where-Object Extension -in '.dll','.exe','.txt' | ForEach-Object {'/resource:'+$_.FullName+',Tony.Payload.'+$_.Name})
-& $compiler /noconfig /nologo /target:library /optimize+ /nostdlib+ ('/out:'+(Join-Path $outDir 'Tony.TeammateHealthBars.dll')) @refs @resources (Join-Path $PSScriptRoot 'TeammateHealthBars\Plugin.cs') (Join-Path $PSScriptRoot 'YouTubeJukebox\YouTubeUrl.cs') (Join-Path $PSScriptRoot 'YouTubeJukebox\YouTubeJukeboxPanel.cs')
+& $compiler /noconfig /nologo /target:library /optimize+ /nostdlib+ ('/out:'+(Join-Path $outDir 'Tony.TeammateHealthBars.dll')) @refs @resources (Join-Path $PSScriptRoot 'TeammateHealthBars\Plugin.cs') (Join-Path $PSScriptRoot 'YouTubeJukebox\YouTubeUrl.cs') (Join-Path $PSScriptRoot 'YouTubeJukebox\YouTubeJukeboxPanel.cs') (Join-Path $PSScriptRoot 'TavernCart\TavernCart.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
 Write-Output (Join-Path $outDir 'Tony.TeammateHealthBars.dll')
