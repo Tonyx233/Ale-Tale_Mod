@@ -47,7 +47,7 @@ namespace TonyMods
         {
             instance = this; config = cfg; log = logger;
             enabledSetting = cfg.Bind("Horse", "Enabled", true, "Enable purchasable two-seat horses.");
-            price = cfg.Bind("Horse", "Price", 2500, new ConfigDescription("Merchant price in gold.", new AcceptableValueRange<int>(1, 60000)));
+            price = cfg.Bind("Horse", "Price", 1, new ConfigDescription("Merchant price in gold.", new AcceptableValueRange<int>(1, 60000)));
             patches = new Harmony("Tony.AleTaleMods.Horse");
             TavernHorse.InstallPatches(patches);
             patches.Patch(AccessTools.Method(typeof(ItemManager), "Awake"), prefix: new HarmonyMethod(typeof(HorseStable), "RegisterItem"));
