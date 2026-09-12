@@ -1,10 +1,10 @@
-# Tony Ale & Tale Mods 0.3.0
+# Tony Ale & Tale Mods 0.4.0
 
-Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機與單人小車共用一個 DLL。
+Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機與六人座小車共用一個 DLL。
 
 ## 功能
 
-- 單人小車：戶外 F6 放置／召回，E 上下車，WASD 移動、Shift 加速。[操作與限制](TavernCart/README.md)
+- 六人座小車：房主戶外 F6 放置空車，E 申請座位；1 位駕駛＋5 位乘客。房间人數仍需額外擴充。[操作與限制](TavernCart/README.md)
 
 - 左側中央紅色血量面板，顯示自己與隊友的名字、HP；單人也可用。
 - 打開原生點唱機介面後，畫面上方提供 YouTube 按鈕。

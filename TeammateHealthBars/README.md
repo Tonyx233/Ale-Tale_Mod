@@ -12,7 +12,7 @@
 
 DLL 位於 `BepInEx/plugins/Tony.TeammateHealthBars/Tony.TeammateHealthBars.dll`。
 透過原本能載入 BepInEx 的方式啟動遊戲；已啟動則需退出後重新啟動。
-整合版載入後 log 會顯示 `Tony Ale & Tale Mods 0.3.0 loaded (health panel + YouTube jukebox + cart).`。
+整合版載入後 log 會顯示 `Tony Ale & Tale Mods 0.4.0 loaded (health panel + YouTube jukebox + cart).`。
 首次載入自動產生 `BepInEx/config/Tony.TeammateHealthBars.cfg`。
 
 ## 設定

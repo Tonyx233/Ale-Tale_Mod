@@ -7,6 +7,10 @@ New-Item -ItemType Directory -Force (Join-Path $root 'bin') | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Test build failed' }
 & (Join-Path $root 'bin\UrlTests.exe')
 if ($LASTEXITCODE -ne 0) { throw 'URL tests failed' }
+& $compiler /nologo /target:exe ('/out:'+(Join-Path $root 'bin\CartSeatsTests.exe')) (Join-Path $PSScriptRoot 'CartSeatsTests.cs') (Join-Path $root 'TavernCart\CartSeats.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Seat test build failed' }
+& (Join-Path $root 'bin\CartSeatsTests.exe')
+if ($LASTEXITCODE -ne 0) { throw 'Seat tests failed' }
 if ($WebView) {
     $stdout = Join-Path $root 'bin\webview-test.log'
     $stderr = Join-Path $root 'bin\webview-test-error.log'
