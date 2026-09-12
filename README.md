@@ -1,10 +1,10 @@
-# Tony Ale & Tale Mods 0.4.0
+# Tony Ale & Tale Mods 0.5.0
 
-Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機與六人座小車共用一個 DLL。
+Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機與雙人馬共用一個 DLL。
 
 ## 功能
 
-- 六人座小車：房主戶外 F6 放置空車，E 申請座位；1 位駕駛＋5 位乘客。房间人數仍需額外擴充。[操作與限制](TavernCart/README.md)
+- 雙人馬：商人購買，背包使用後在戶外放置；1 位駕駛＋1 位乘客，Ctrl+F1/F2 換位，附帶存檔。[操作與限制](Horse/README.md)
 
 - 左側中央紅色血量面板，顯示自己與隊友的名字、HP；單人也可用。
 - 打開原生點唱機介面後，畫面上方提供 YouTube 按鈕。
@@ -18,9 +18,9 @@ Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機�
 需要 Windows x64、BepInEx 5，以及 Microsoft Edge WebView2 Evergreen Runtime。
 編譯後只複製 `bin/Tony.TeammateHealthBars.dll` 到：
 
-`BepInEx/plugins/Tony.TeammateHealthBars/Tony.TeammateHealthBars.dll`
+`BepInEx/plugins/TONY_BIG_SET.dll`
 
-保留原檔名與 plugin GUID，以相容既有血量設定；不要同時放兩份 DLL。
+此電腦沿用 TONY_BIG_SET.dll 檔名，plugin GUID 保持不變以相容既有血量設定；不要同時放兩份 DLL。
 DLL 內包含模組程式、播放器 helper 與 WebView2 SDK 元件。
 首次開啟播放器會解出元件到 `BepInEx/cache/TonyAleTaleMods/0.2.0/`。
 WebView2 Runtime 是額外系統依賴，瀏覽器資料位於 `%LOCALAPPDATA%/TonyAleTaleMods/WebView2/`。
@@ -59,3 +59,6 @@ WebView2 元件與 helper 嵌入最終 DLL，遊戲 assemblies 不隨套件發�
 血量面板多人同步亦需兩名玩家驗證。
 
 [血量面板設定](TeammateHealthBars/README.md)
+
+雙人馬已通過編譯、座位及步態測試與 API 靜態檢查；尚未做遊戲內雙人、購買、存檔實測。
+[模型動畫預覽](Horse/Assets/preview.html)（下載後用瀏覽器開啟）。

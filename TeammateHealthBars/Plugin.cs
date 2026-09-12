@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace TonyMods
 {
-    [BepInPlugin("Tony.TeammateHealthBars", "Tony Ale & Tale Mods", "0.4.0")]
+    [BepInPlugin("Tony.TeammateHealthBars", "Tony Ale & Tale Mods", "0.5.0")]
     public sealed class TeammateHealthBars : BaseUnityPlugin
     {
         private sealed class Entry
@@ -32,9 +32,9 @@ namespace TonyMods
             panel = Config.Bind("Display", "TeamPanel", true, "Show yourself and teammates at the left-center of the screen, including solo play.");
             scale = Config.Bind("Display", "UIScale", 1f, new ConfigDescription("UI size multiplier.", new AcceptableValueRange<float>(0.5f, 2f)));
             leftMargin = Config.Bind("Display", "LeftMargin", 8f, new ConfigDescription("Team panel distance from the left edge.", new AcceptableValueRange<float>(0f, 200f)));
-            Logger.LogInfo("Tony Ale & Tale Mods 0.4.0 loaded (health panel + YouTube jukebox + cart).");
+            Logger.LogInfo("Tony Ale & Tale Mods 0.5.0 loaded (health panel + YouTube jukebox + two-seat horses).");
             gameObject.AddComponent<YouTubeJukeboxPanel>().Initialize(Logger);
-            gameObject.AddComponent<TavernCart>().Initialize(Config, Logger);
+            gameObject.AddComponent<HorseStable>().Initialize(Config, Logger);
         }
 
         private void Update()

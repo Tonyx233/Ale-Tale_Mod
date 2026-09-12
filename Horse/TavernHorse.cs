@@ -11,35 +11,48 @@ using UnityEngine.SceneManagement;
 
 namespace TonyMods
 {
-    public sealed class TavernCart : MonoBehaviour
+    public sealed class TavernHorse : MonoBehaviour
     {
-        private const string Channel = "Tony.Cart.v040";
-        private const float MountRange = 4f, CartRadius = 0.85f;
-        private static TavernCart instance;
-        private readonly CartSeats seats = new CartSeats();
+        private string Channel;
+        public string Id { get; private set; }
+        public string SceneName { get; private set; }
+        private HorseModel model;
+        private static readonly List<TavernHorse> all = new List<TavernHorse>();
+        public static IEnumerable<TavernHorse> All { get { return all; } }
+        public bool HasRider(ulong id) { return seats.Find(id) >= 0; }
+        public Vector3 Position { get { return vehiclePosition; } }
+        public float Yaw { get { return vehicleRotation.eulerAngles.y; } }
+        private const float MountRange = 3f, CartRadius = 0.55f;
+        private static TavernHorse Active
+        {
+            get { foreach (var h in all) if (h.localSeat >= 0) return h; return null; }
+        }
+        private static TavernHorse Nearest
+        {
+            get { TavernHorse best = null; float distance = MountRange; foreach (var h in all) { if (h.cart == null || PlayerNet.Instance == null || h.SceneName != SceneManager.GetActiveScene().name) continue; float d = Vector3.Distance(h.Position, PlayerNet.Instance.transform.position); if (d < distance) { distance = d; best = h; } } return best; }
+        }
+        private readonly HorseSeats seats = new HorseSeats();
         private readonly Dictionary<ulong, float> peers = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> lastRequest = new Dictionary<ulong, float>();
-        private readonly List<Transform> wheels = new List<Transform>();
-        private readonly List<Material> materials = new List<Material>();
-        private readonly Vector3[] offsets = { new Vector3(0,0,1.05f), new Vector3(-0.53f,0,0.1f), new Vector3(0.53f,0,0.1f), new Vector3(-0.53f,0,-0.85f), new Vector3(0.53f,0,-0.85f), new Vector3(0,0,-1.65f) };
+        private readonly Vector3[] offsets = { new Vector3(0,0,.20f), new Vector3(0,0,-.48f) };
         private ConfigEntry<bool> enabledSetting;
-        private ConfigEntry<KeyCode> summonKey, mountKey;
+        private ConfigEntry<KeyCode> mountKey;
         private ConfigEntry<float> cruise, boost;
         private NetworkManager network;
-        private Harmony patches;
+
         private ManualLogSource log;
         private GameObject cart;
         private BoxCollider parkedCollider;
         private PlayerNet rider;
         private PlayerMovement movement;
         private CharacterController controller;
-        private float originalRadius, passengerPitch, passengerYaw;
+        private float originalRadius, originalViewOffset, passengerPitch, passengerYaw;
         private bool handsVisible, controllerEnabled;
         private Vector3 lastPosition, vehiclePosition;
         private Quaternion vehicleRotation = Quaternion.identity;
         private int localSeat = -1, consumeFrame = -1, serial, receivedSerial = -1, cartScene = -1;
         private float nextHello, nextState, noticeUntil, lastStateAt, driverGraceUntil;
-        private bool attemptedSpawn;
+
         private string notice = "";
         [Serializable] private sealed class Wire
         {
@@ -50,20 +63,21 @@ namespace TonyMods
             public float yaw;
         }
 
-        public void Initialize(ConfigFile config, ManualLogSource logger)
+        public void Initialize(ConfigFile config, ManualLogSource logger, NetworkManager net, string id, string scene, Vector3 position, float yaw)
         {
-            instance = this; log = logger;
-            enabledSetting = config.Bind("Cart", "Enabled", true, "Shared six-seat cart. All riders and the host need this mod version.");
-            summonKey = config.Bind("Cart", "SummonKey", KeyCode.F6, "Host places or recalls an empty cart outside.");
-            mountKey = config.Bind("Cart", "MountKey", KeyCode.E, "Request a seat or safely leave the cart.");
-            cruise = config.Bind("Cart", "SpeedMultiplier", 1.8f, new ConfigDescription("Driver walking speed multiplier.", new AcceptableValueRange<float>(1f, 3f)));
-            boost = config.Bind("Cart", "SprintMultiplier", 2.4f, new ConfigDescription("Driver Shift speed multiplier.", new AcceptableValueRange<float>(1f, 4f)));
-            patches = new Harmony("Tony.AleTaleMods.Cart");
-            patches.Patch(AccessTools.Method(typeof(PlayerMovement), "HandleCharacterMovement"), prefix: new HarmonyMethod(typeof(TavernCart), "BeforeMove"), finalizer: new HarmonyMethod(typeof(TavernCart), "AfterMove"));
+            log = logger; Id = id; SceneName = scene; Channel = "Tony.Horse.v050." + id;
+            enabledSetting = config.Bind("Horse", "Enabled", true, "Shared two-seat horses. All riders and host need this version.");
+            mountKey = config.Bind("Horse", "MountKey", KeyCode.E, "Mount or dismount the closest horse.");
+            cruise = config.Bind("Cart", "SpeedMultiplier", 1.8f);
+            boost = config.Bind("Cart", "SprintMultiplier", 2.4f);
+            Bind(net); vehiclePosition = position; vehicleRotation = Quaternion.Euler(0,yaw,0);
+            BuildCart(); cart.transform.SetPositionAndRotation(position,vehicleRotation); all.Add(this);
+        }
+        public static void InstallPatches(Harmony patches)
+        {
+            patches.Patch(AccessTools.Method(typeof(PlayerMovement), "HandleCharacterMovement"), prefix: new HarmonyMethod(typeof(TavernHorse), "BeforeMove"), finalizer: new HarmonyMethod(typeof(TavernHorse), "AfterMove"));
             foreach (string name in new[] { "GetJumpInputDown", "GetJumpInputHeld", "GetDashInputDown", "GetCrouchInputDown", "GetCrouchInputHeld", "GetFireInputDown", "GetFireInputHeld", "GetFireInputReleased", "GetAimInputDown", "GetAimInputHeld", "GetAimInputReleased", "GetDropInputDown", "GetAutoRunInputDown", "GetUseInputDown", "GetUseInput", "GetUseInputUp" })
-                patches.Patch(AccessTools.Method(typeof(PlayerInput), name), prefix: new HarmonyMethod(typeof(TavernCart), "FilterAction"));
-            SceneManager.sceneUnloaded += SceneUnloaded;
-            log.LogInfo("Six-seat cart ready: host F6 places cart; E requests driver/passenger seat.");
+                patches.Patch(AccessTools.Method(typeof(PlayerInput), name), prefix: new HarmonyMethod(typeof(TavernHorse), "FilterAction"));
         }
         private static bool CanInput()
         {
@@ -86,32 +100,35 @@ namespace TonyMods
         {
             if (network != null && network.CustomMessagingManager != null) network.CustomMessagingManager.UnregisterNamedMessageHandler(Channel);
             RestoreRider(); RemoveCart(); seats.Clear(); peers.Clear(); lastRequest.Clear();
-            network = null; attemptedSpawn = false; receivedSerial = -1; serial = 0;
+            network = null; receivedSerial = -1; serial = 0;
         }
         private void Update()
         {
             NetworkManager net = NetworkManager.Singleton;
             if (!enabledSetting.Value || net == null || !net.IsListening || PlayerNet.Instance == null || !PlayerNet.Instance.IsSpawned)
-            { if (network != null) Unbind(); return; }
-            if (network != net) Bind(net);
+            { RestoreRider(); return; }
+            if (network != net) return;
             if (Time.unscaledTime >= nextHello) { nextHello = Time.unscaledTime + 1; Request(0); }
             if (network.IsServer)
             {
-                for (int i = 0; i < CartSeats.Capacity; i++)
+                for (int i = 0; i < HorseSeats.Capacity; i++)
                 {
                     ulong id = seats[i]; float seen;
-                    if (id != CartSeats.Empty && (!Alive(Player(id)) || (id != network.LocalClientId && (!peers.TryGetValue(id, out seen) || Time.unscaledTime - seen > 5)))) seats.Remove(id);
+                    if (id != HorseSeats.Empty && (!Alive(Player(id)) || (id != network.LocalClientId && (!peers.TryGetValue(id, out seen) || Time.unscaledTime - seen > 5)))) seats.Remove(id);
                 }
                 FollowDriver();
-                if (!attemptedSpawn && CanInput()) { attemptedSpawn = true; PlaceCart(); }
-                if (Time.unscaledTime >= nextState) { nextState = Time.unscaledTime + 0.1f; Broadcast(); }
+                if (Time.unscaledTime >= nextState) { nextState = Time.unscaledTime + (seats.Count > 0 ? 0.1f : 1f); Broadcast(); }
             }
             else if (Time.unscaledTime - lastStateAt > 5)
-            { RestoreRider(); RemoveCart(); seats.Clear(); receivedSerial = -1; Tell("Waiting for a compatible cart host..."); }
+            { RestoreRider(); seats.Clear(); receivedSerial = -1; Tell("Waiting for a compatible horse host..."); }
             ApplySeat();
             if (!CanInput()) return;
-            if (Input.GetKeyDown(summonKey.Value)) Request(3);
-            if (Input.GetKeyDown(mountKey.Value) && (localSeat >= 0 || NearCart()))
+            if (localSeat >= 0 && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)))
+            {
+                if (Input.GetKeyDown(KeyCode.F1)) Request(7);
+                if (Input.GetKeyDown(KeyCode.F2)) Request(8);
+            }
+            if (Input.GetKeyDown(mountKey.Value) && (localSeat >= 0 || (Active == null && Nearest == this)))
             { consumeFrame = Time.frameCount; Request(localSeat >= 0 ? 2 : 1); }
             if (localSeat == 0 && movement != null && (movement.isInWater || movement.isOverWater)) Request(2);
         }
@@ -152,7 +169,7 @@ namespace TonyMods
                     else if (packet.op == 6) Tell(packet.message);
                 }
             }
-            catch (Exception ex) { log.LogWarning("Cart message rejected: " + ex.Message); }
+            catch (Exception ex) { log.LogWarning("Horse message rejected: " + ex.Message); }
         }
         private static bool Finite(float v) { return !Single.IsNaN(v) && !Single.IsInfinity(v); }
         private static bool Finite(Vector3 v) { return Finite(v.x) && Finite(v.y) && Finite(v.z); }
@@ -160,7 +177,7 @@ namespace TonyMods
         {
             bool connected = sender == network.LocalClientId;
             foreach (ulong id in network.ConnectedClientsIds) if (id == sender) connected = true;
-            if (!connected || packet.op < 0 || packet.op > 3) return;
+            if (!connected || !(packet.op == 0 || packet.op == 1 || packet.op == 2 || packet.op == 7 || packet.op == 8)) return;
             if (packet.op == 0) { peers[sender] = Time.unscaledTime; return; }
             if (!peers.ContainsKey(sender)) return;
             float previous;
@@ -168,21 +185,23 @@ namespace TonyMods
             lastRequest[sender] = Time.unscaledTime;
             PlayerNet player = Player(sender);
             if (!Alive(player)) return;
-            if (packet.op == 3)
+            if (packet.op == 7 || packet.op == 8)
             {
-                if (sender != network.LocalClientId) { Note(sender, "Only the host can recall an empty cart."); return; }
-                if (seats.Count != 0) { Note(sender, "Everyone must leave before recalling the cart."); return; }
-                PlaceCart();
+                int target = packet.op == 7 ? 0 : 1;
+                if (!seats.TrySwitch(sender, target)) { Note(sender, "Seat occupied, or you are not riding this horse."); return; }
+                if (target == 0) driverGraceUntil = Time.unscaledTime + .75f;
+                if (sender == network.LocalClientId) ApplySeat();
             }
             else if (packet.op == 1)
             {
                 if (cart == null || Vector3.Distance(player.transform.position, vehiclePosition) > MountRange) return;
+                foreach (var other in all) if (other != this && other.HasRider(sender)) return;
                 RaycastHit hit;
                 if (Physics.Linecast(player.transform.position + Vector3.up, vehiclePosition + Vector3.up, out hit, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) &&
                     !hit.transform.IsChildOf(cart.transform) && !hit.transform.IsChildOf(player.transform)) return;
                 bool newRider = seats.Find(sender) < 0;
                 int assigned = seats.Board(sender);
-                if (assigned < 0) Note(sender, "Cart is full (6/6).");
+                if (assigned < 0) Note(sender, "Horse is full (2/2).");
                 else if (assigned == 0 && newRider) driverGraceUntil = Time.unscaledTime + 0.75f;
                 if (parkedCollider != null) parkedCollider.enabled = seats.Count == 0;
                 if (sender == network.LocalClientId) ApplySeat();
@@ -190,7 +209,7 @@ namespace TonyMods
             else if (packet.op == 2 && seats.Find(sender) >= 0)
             {
                 Vector3 exit;
-                if (!FindExit(player, out exit)) { Note(sender, "No safe exit. Move the cart to open ground."); return; }
+                if (!FindExit(player, out exit)) { Note(sender, "No safe exit. Move the horse to open ground."); return; }
                 seats.Remove(sender);
                 if (sender == network.LocalClientId) ExitAt(exit);
                 else Send(sender, new Wire { op = 5, position = exit });
@@ -222,7 +241,7 @@ namespace TonyMods
         private void ApplySeat()
         {
             int wanted = seats.Find(network.LocalClientId);
-            if (!Alive(PlayerNet.Instance) || cart == null) wanted = -1;
+            if (!Alive(PlayerNet.Instance) || cart == null || SceneName != SceneManager.GetActiveScene().name) wanted = -1;
             if (wanted == localSeat && (wanted < 0 || rider == PlayerNet.Instance)) return;
             RestoreRider();
             if (wanted < 0) return;
@@ -230,7 +249,7 @@ namespace TonyMods
             controller = rider.GetComponent<CharacterController>();
             if (movement == null || controller == null) { rider = null; movement = null; return; }
             parkedCollider.enabled = false;
-            localSeat = wanted; originalRadius = controller.radius; controllerEnabled = controller.enabled;
+            localSeat = wanted; originalViewOffset = movement.fpViewHeightOffset; movement.fpViewHeightOffset += .72f; originalRadius = controller.radius; controllerEnabled = controller.enabled;
             handsVisible = movement.fpHands != null && movement.fpHands.gameObject.activeSelf;
             if (movement.fpHands != null) movement.fpHands.gameObject.SetActive(false);
             controller.enabled = false;
@@ -240,13 +259,14 @@ namespace TonyMods
             movement.characterVelocity = Vector3.zero; movement.isAutoRunning = false;
             passengerPitch = passengerYaw = 0;
             lastPosition = rider.transform.position;
-            Tell(wanted == 0 ? "Driver: WASD | Shift boost | E exit" : "Passenger " + wanted + "/5 | E exit");
+            Tell(wanted == 0 ? "Driver: WASD | Shift boost | E exit" : "Passenger | E exit | Ctrl+F1: driver");
         }
         private void RestoreRider()
         {
             if (controller != null) { controller.radius = originalRadius; controller.enabled = controllerEnabled && Alive(rider); }
             if (movement != null)
             {
+                movement.fpViewHeightOffset = originalViewOffset;
                 movement.characterVelocity = Vector3.zero; movement.isAutoRunning = false;
                 if (movement.fpHands != null) movement.fpHands.gameObject.SetActive(handsVisible);
             }
@@ -287,10 +307,11 @@ namespace TonyMods
                 cart.transform.SetPositionAndRotation(Vector3.Lerp(cart.transform.position, vehiclePosition, Mathf.Clamp01(Time.unscaledDeltaTime * 15)), Quaternion.Slerp(cart.transform.rotation, vehicleRotation, Mathf.Clamp01(Time.unscaledDeltaTime * 15)));
             else cart.transform.SetPositionAndRotation(vehiclePosition, vehicleRotation);
             parkedCollider.enabled = seats.Count == 0;
-            foreach (Transform wheel in wheels) wheel.Rotate(Vector3.up, Vector3.Dot(delta, cart.transform.forward) / 0.34f * Mathf.Rad2Deg, Space.Self);
+            cart.SetActive(SceneName == SceneManager.GetActiveScene().name);
+            if (model != null) model.Animate(Time.deltaTime);
             if (localSeat > 0 && rider != null)
             {
-                rider.transform.position = cart.transform.position + cart.transform.rotation * offsets[localSeat] + Vector3.up * 0.35f;
+                rider.transform.position = cart.transform.position + cart.transform.rotation * offsets[localSeat];
                 rider.transform.rotation = cart.transform.rotation * Quaternion.Euler(0, passengerYaw, 0);
                 if (CanInput())
                 {
@@ -302,26 +323,10 @@ namespace TonyMods
                 PlayerManager.LocalPlayerPosition = rider.transform.position;
             }
         }
-        private void PlaceCart()
-        {
-            if (!network.IsServer || seats.Count > 0 || PlayerMovement.Instance == null || !PlayerMovement.Instance.isGrounded) return;
-            CharacterController cc = PlayerNet.Instance.GetComponent<CharacterController>();
-            if (cc == null) return;
-            Vector3 forward = Vector3.ProjectOnPlane(PlayerNet.Instance.transform.forward, Vector3.up).normalized;
-            Vector3 spot = Vector3.zero; bool found = false;
-            for (int ring = 0; ring < 3 && !found; ring++)
-                for (int i = 0; i < 8 && !found; i++) found = GroundSpot(PlayerNet.Instance.transform.position + Quaternion.Euler(0,i*45,0)*forward*(5+ring*2), 2f, 4.2f, true, out spot);
-            if (!found) { Tell("Find a large open outdoor area and press F6."); return; }
-            RemoveCart(); BuildCart();
-            vehiclePosition = spot; vehicleRotation = Quaternion.LookRotation(forward);
-            cart.transform.SetPositionAndRotation(vehiclePosition, vehicleRotation);
-            cartScene = PlayerNet.Instance.gameObject.scene.handle;
-            Tell("Six-seat cart placed. E boards the first free seat (driver first).");
-        }
         private sealed class SpeedState { public float ground, air; }
         private static bool BeforeMove(PlayerMovement __instance, out SpeedState __state)
         {
-            __state = null; TavernCart self = instance;
+            __state = null; TavernHorse self = Active;
             if (self == null || self.localSeat < 0 || self.movement != __instance) return true;
             if (self.localSeat > 0) return false;
             __state = new SpeedState { ground=__instance.maxSpeedOnGround, air=__instance.maxSpeedInAir };
@@ -336,7 +341,7 @@ namespace TonyMods
         }
         private static bool FilterAction(MethodBase __originalMethod, ref bool __result)
         {
-            TavernCart self=instance;
+            TavernHorse self=Active ?? Nearest;
             if (self == null || !self.enabledSetting.Value) return true;
             if (self.localSeat >= 0 || (__originalMethod.Name.StartsWith("GetUse",StringComparison.Ordinal) &&
                 (self.consumeFrame==Time.frameCount || (CanInput()&&Input.GetKey(self.mountKey.Value)&&self.NearCart())))) { __result=false; return false; }
@@ -345,21 +350,11 @@ namespace TonyMods
         private void Tell(string text) { notice=text; noticeUntil=Time.unscaledTime+5; }
         private void OnGUI()
         {
-            if (network==null || !enabledSetting.Value) return;
-            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift boost | E exit" : localSeat>0 ? "Passenger "+localSeat+"/5 | E exit" : CanInput()&&NearCart() ? "E: Board ("+seats.Count+"/6) | Host F6: recall" : "";
+            if (network==null || !enabledSetting.Value || (Active != this && Nearest != this)) return;
+            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift | E exit | Ctrl+F2: passenger" : localSeat>0 ? "Passenger | E exit | Ctrl+F1: driver" : CanInput()&&NearCart() ? "E: Mount horse ("+seats.Count+"/2)" : "";
             if (!String.IsNullOrEmpty(text)) GUI.Box(new Rect(Screen.width/2-270,Screen.height-175,540,35),text);
         }
-        private void SceneUnloaded(Scene scene)
-        {
-            if (scene.handle!=cartScene) return;
-            RestoreRider(); RemoveCart(); seats.Clear(); attemptedSpawn=false;
-            if (network!=null && network.IsServer) Broadcast();
-        }
-        private void OnDestroy()
-        {
-            Unbind(); SceneManager.sceneUnloaded-=SceneUnloaded;
-            if (patches!=null) patches.UnpatchSelf(); if(instance==this)instance=null;
-        }
+        private void OnDestroy() { Unbind(); all.Remove(this); }
         // Ground clearance and procedural cart geometry.
 
         private bool GroundSpot(Vector3 near, float radius, float height, bool outdoors, out Vector3 ground)
@@ -390,67 +385,14 @@ namespace TonyMods
 
         private void BuildCart()
         {
-            cart = new GameObject("Tony Six Seat Cart");
-            Material wood = MakeMaterial(new Color(0.38f, 0.18f, 0.07f));
-            Material rim = MakeMaterial(new Color(0.12f, 0.12f, 0.13f));
-            Material seat = MakeMaterial(new Color(0.5f, 0.08f, 0.06f));
-            Part("Floor", PrimitiveType.Cube, new Vector3(0, 0.43f, 0), new Vector3(1.6f, 0.16f, 4f), wood);
-            Part("Left rail", PrimitiveType.Cube, new Vector3(-0.82f, 0.8f, 0), new Vector3(0.1f, 0.5f, 4f), wood);
-            Part("Right rail", PrimitiveType.Cube, new Vector3(0.82f, 0.8f, 0), new Vector3(0.1f, 0.5f, 4f), wood);
-            Part("Front rail", PrimitiveType.Cube, new Vector3(0, 0.8f, 1.95f), new Vector3(1.6f, 0.5f, 0.1f), wood);
-            Part("Handle", PrimitiveType.Cube, new Vector3(0, 1.05f, 1.65f), new Vector3(0.75f, 0.07f, 0.08f), rim);
-            for (int seatIndex = 0; seatIndex < offsets.Length; seatIndex++)
-            {
-                Vector3 at = offsets[seatIndex];
-                Part("Seat " + seatIndex, PrimitiveType.Cube, at + new Vector3(0,0.65f,0), new Vector3(0.65f,0.15f,0.55f), seat);
-                Part("Back " + seatIndex, PrimitiveType.Cube, at + new Vector3(0,0.95f,-0.3f), new Vector3(0.65f,0.55f,0.08f), seat);
-            }
-            for (int side = -1; side <= 1; side += 2)
-                for (int end = -1; end <= 1; end += 2)
-                {
-                    Transform wheel = Part("Wheel", PrimitiveType.Cylinder, new Vector3(side * 0.94f, 0.34f, end * 1.5f), new Vector3(0.68f, 0.08f, 0.68f), rim);
-                    wheel.localRotation = Quaternion.Euler(0, 0, 90);
-                    Transform spoke = Part("Spoke", PrimitiveType.Cube, Vector3.zero, Vector3.one, wood);
-                    spoke.SetParent(wheel, false);
-                    spoke.localPosition = Vector3.zero;
-                    spoke.localScale = new Vector3(0.75f, 2.1f, 0.13f);
-                    wheels.Add(wheel);
-                }
+            cart = new GameObject("Tony Two Seat Horse"); cart.transform.SetParent(transform, false);
+            model = HorseModel.Create(cart.transform);
             parkedCollider = cart.AddComponent<BoxCollider>();
-            parkedCollider.center = new Vector3(0, 0.6f, 0);
-            parkedCollider.size = new Vector3(2f, 1.2f, 4.1f);
-        }
-        private Material MakeMaterial(Color color)
-        {
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-            if (shader == null) throw new InvalidOperationException("Cart material shader unavailable.");
-            Material material = new Material(shader);
-            material.color = color;
-            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
-            materials.Add(material);
-            return material;
-        }
-        private Transform Part(string name, PrimitiveType kind, Vector3 position, Vector3 size, Material material)
-        {
-            GameObject part = GameObject.CreatePrimitive(kind);
-            part.name = name;
-            part.transform.SetParent(cart.transform, false);
-            part.transform.localPosition = position;
-            part.transform.localScale = size;
-            Collider collider = part.GetComponent<Collider>();
-            collider.enabled = false;
-            Destroy(collider);
-            part.GetComponent<Renderer>().sharedMaterial = material;
-            return part.transform;
+            parkedCollider.center = new Vector3(0,1.2f,0); parkedCollider.size = new Vector3(.9f,2.4f,2.7f);
         }
         private void RemoveCart()
         {
-            if (cart != null) Destroy(cart);
-            cart = null; parkedCollider = null; cartScene = -1;
-            wheels.Clear();
-            foreach (Material material in materials) if (material != null) Destroy(material);
-            materials.Clear();
+            if (cart != null) Destroy(cart); cart = null; parkedCollider = null; model = null;
         }
-
     }
 }
