@@ -267,7 +267,7 @@ namespace TonyMods
             var handle=LocalizationSettings.StringDatabase.GetTableAsync("ItemData"); yield return handle;
             var table=handle.Result;if(table==null)yield break;
             bool zh=LocalizationSettings.SelectedLocale!=null && LocalizationSettings.SelectedLocale.Identifier.Code.StartsWith("zh",StringComparison.OrdinalIgnoreCase);
-            SetText(table,"TonyHorseName",zh?"雙人馬":"Two-seat Horse");
+            SetText(table,"TonyHorseName",zh?"牛馬":"Two-seat Horse");
             SetText(table,"TonyHorseDescription",zh?"可供一位駕駛與一位乘客騎乘。於戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+F1/F2 換位。":"Use from your inventory outdoors to place a horse for a driver and passenger. E mounts, Shift boosts, Ctrl+F1/F2 switches seats.");
             SetText(table,"TonyHorseUse",zh?"戶外使用：放置雙人馬":"Use outdoors: place horse");
         }
