@@ -250,6 +250,7 @@ namespace TonyMods
             if (movement == null || controller == null) { rider = null; movement = null; return; }
             parkedCollider.enabled = false;
             localSeat = wanted; originalViewOffset = movement.fpViewHeightOffset; movement.fpViewHeightOffset += .72f; originalRadius = controller.radius; controllerEnabled = controller.enabled;
+            UpdateRiderView(movement);
             handsVisible = movement.fpHands != null && movement.fpHands.gameObject.activeSelf;
             if (movement.fpHands != null) movement.fpHands.gameObject.SetActive(false);
             controller.enabled = false;
@@ -267,6 +268,7 @@ namespace TonyMods
             if (movement != null)
             {
                 movement.fpViewHeightOffset = originalViewOffset;
+                UpdateRiderView(movement);
                 movement.characterVelocity = Vector3.zero; movement.isAutoRunning = false;
                 if (movement.fpHands != null) movement.fpHands.gameObject.SetActive(handsVisible);
             }
@@ -297,8 +299,16 @@ namespace TonyMods
             player.transform.position = position - Vector3.up * (cc.center.y - cc.height / 2);
             cc.enabled = wasEnabled;
         }
+        // Preserve the installed camera-height fix when rebuilding from source.
+        private static void UpdateRiderView(PlayerMovement movement)
+        {
+            if (movement == null || movement.fpView == null) return;
+            movement.fpView.localPosition = new Vector3(0,
+                movement.capsuleHeightStanding + movement.fpViewHeightOffset, 0);
+        }
         private void LateUpdate()
         {
+            UpdateRiderView(movement);
             if (cart == null || network == null) return;
             // Driver already uses the game's owner-authoritative NetworkTransform.
             FollowDriver();

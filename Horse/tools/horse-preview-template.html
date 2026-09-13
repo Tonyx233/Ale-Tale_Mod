@@ -1,10 +1,10 @@
 <!doctype html><meta charset="utf-8"><title>雙人馬 · 模型與步態預覽</title>
 <style>body{margin:0;background:#17231f;color:#f4ead6;font:16px system-ui}canvas{width:100vw;height:88vh;display:block}footer{padding:12px 28px;display:flex;gap:18px;align-items:center}button{background:#36584a;border:1px solid #648574;color:inherit;border-radius:8px;padding:9px 20px;cursor:pointer}span{color:#b5c6bc}#label{position:absolute;top:25px;left:30px;pointer-events:none}h2{margin:0 0 8px}p{margin:4px 0}</style>
-<div id="label"><h2>雙人馬 · 原創低多邊形模型</h2><p>前座駕駛 / 後座乘客 · 拖曳旋轉 · 滾輪縮放</p><span>模型資料與 DLL 共用；此處為獨立動畫預覽，非遊戲截圖</span></div>
+<div id="label"><h2>雙人馬 · 栗色雕塑模型</h2><p>前座駕駛 / 後座乘客 · 拖曳旋轉 · 滾輪縮放</p><span>模型資料與 DLL 共用；此處為獨立動畫預覽，非遊戲截圖</span></div>
 <canvas id="c"></canvas><footer><button onclick="target=0">待機</button><button onclick="target=2">行走</button><button onclick="target=8">奔跑</button><button onclick="paused=!paused">暫停 / 繼續</button><span id="stats"></span></footer>
 <script>
 const model=__MODEL__;
-const c=document.getElementById('c'),ctx=c.getContext('2d');let yaw=.85,pitch=-.12,zoom=145,target=0,speed=0,phase=0,paused=false,drag=false,last=performance.now();
+const c=document.getElementById('c');let yaw=-.7,pitch=-.12,zoom=240,target=0,speed=0,phase=0,paused=false,drag=false,last=performance.now();
 c.onpointerdown=e=>{drag=true;c.setPointerCapture(e.pointerId)};c.onpointerup=()=>drag=false;c.onpointermove=e=>{if(drag){yaw+=e.movementX*.008;pitch=Math.max(-.8,Math.min(.6,pitch+e.movementY*.005))}};c.onwheel=e=>{zoom=Math.max(80,Math.min(350,zoom-e.deltaY*.1));e.preventDefault()};
 const add=(a,b)=>a.map((x,i)=>x+b[i]);
 function rotate(p,r){let [x,y,z]=p;for(let i=0;i<3;i++){let a=r[i]*Math.PI/180,C=Math.cos(a),S=Math.sin(a);if(i===0)[y,z]=[y*C-z*S,y*S+z*C];if(i===1)[x,z]=[x*C+z*S,-x*S+z*C];if(i===2)[x,y]=[x*C-y*S,x*S+y*C]}return[x,y,z]}
@@ -12,13 +12,30 @@ function cam(p){let [x,y,z]=rotate([p[0],p[1]-1.3,p[2]],[0,yaw*180/Math.PI,0]);r
 function project(p){let q=cam(p);return[c.width*.5+q[0]*zoom,c.height*.53-q[1]*zoom,q[2]]}
 function point(i,j){let a=Math.PI*i/6,b=2*Math.PI*j/10;return[.5*Math.sin(a)*Math.cos(b),.5*Math.cos(a),.5*Math.sin(a)*Math.sin(b)]}
 let local=[];for(let i=0;i<6;i++)for(let j=0;j<10;j++){let a=point(i,j),b=point(i+1,j),d=point(i,j+1),e=point(i+1,j+1);local.push([a,e,b],[a,d,e])}
-function frame(now){let dt=Math.min(.05,(now-last)/1000);last=now;if(!paused){speed+=(target-speed)*Math.min(1,dt*8);phase+=dt*(.5+2.3*Math.min(1,speed/8))*Math.PI*2}c.width=innerWidth;c.height=innerHeight*.88;ctx.fillStyle='#17231f';ctx.fillRect(0,0,c.width,c.height);
+function partTriangles(p){const out=[];for(let i=0;i<p.triangles.length;i+=3)out.push(p.triangles.slice(i,i+3).map(k=>p.vertices.slice(k*3,k*3+3)));return out;}
+for(const p of model.parts)p.geometry=partTriangles(p);
+// WebGL depth testing displays intersecting saddle and body surfaces correctly.
+const gl=c.getContext('webgl',{antialias:true});
+if(!gl)throw Error('WebGL unavailable; open model-review.png instead');
+function shader(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;}
+const program=gl.createProgram();
+gl.attachShader(program,shader(gl.VERTEX_SHADER,'attribute vec3 position; attribute vec3 color; varying vec3 tint; uniform vec4 camera; uniform vec2 scale; void main(){vec3 p=position-vec3(0.,1.5,0.);p=vec3(p.x*camera.x+p.z*camera.y,p.y,-p.x*camera.y+p.z*camera.x);p=vec3(p.x,p.y*camera.z-p.z*camera.w,p.y*camera.w+p.z*camera.z);gl_Position=vec4(p.x*scale.x,p.y*scale.y,-p.z/10.,1.);tint=color;}'));
+gl.attachShader(program,shader(gl.FRAGMENT_SHADER,'precision mediump float; varying vec3 tint; void main(){gl_FragColor=vec4(tint,1.);}'));
+gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));gl.useProgram(program);gl.enable(gl.DEPTH_TEST);gl.enable(gl.CULL_FACE);
+const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);for(const [name,offset] of [['position',0],['color',12]]){const a=gl.getAttribLocation(program,name);gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,3,gl.FLOAT,false,24,offset);}
+const camera=gl.getUniformLocation(program,'camera'),scale=gl.getUniformLocation(program,'scale');
+function drawMesh(triangles){
+ const data=new Float32Array(triangles.length*18);let cursor=0;
+ for(const t of triangles)for(const v of t.vertices){data.set(v,cursor);data.set(t.rgb,cursor+3);cursor+=6;}
+ gl.viewport(0,0,c.width,c.height);gl.clearColor(.89,.875,.83,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.uniform4f(camera,Math.cos(yaw),Math.sin(yaw),Math.cos(pitch),Math.sin(pitch));gl.uniform2f(scale,zoom*2/c.width,zoom*2/c.height);gl.bufferData(gl.ARRAY_BUFFER,data,gl.DYNAMIC_DRAW);gl.drawArrays(gl.TRIANGLES,0,triangles.length*3);
+}
+
+function frame(now){let dt=Math.min(.05,(now-last)/1000);last=now;if(!paused){speed+=(target-speed)*Math.min(1,dt*8);phase+=dt*(.5+2.3*Math.min(1,speed/8))*Math.PI*2}c.width=innerWidth;c.height=innerHeight*.88;
 let w=Math.min(1,speed/.8),run=Math.max(0,Math.min(1,(speed-4)/3)),poses={};for(let b of model.bones)poses[b.name]={p:b.p.slice(),r:[0,0,0],parent:b.parent};
 for(let i=0;i<4;i++){let walk=[0,Math.PI,Math.PI*1.5,Math.PI*.5],gallop=[0,.6,Math.PI,Math.PI+.6],a=phase+walk[i]*(1-run)+gallop[i]*run;poses['leg'+i].r[0]=Math.sin(a)*(23+15*run)*w;poses['shin'+i].r[0]=Math.max(0,Math.sin(a+.65))*(35+25*run)*w}
 poses.body.p[1]=Math.sin(phase*2)*.035*w;poses.neck.r[0]=Math.sin(phase)*(2+4*w);poses.tail.r=[8*w,Math.sin(phase*.7)*12,0];poses.earL.r[2]=-10+Math.sin(phase*.3)*6;poses.earR.r[2]=10-Math.sin(phase*.3)*6;
 function world(p,name){if(!name)return p;let b=poses[name];return world(add(rotate(p,b.r),b.p),b.parent)}
-for(let i=-6;i<=6;i++){ctx.strokeStyle='#294035';ctx.beginPath();for(let p of [[i,0,-6],[i,0,6]]){let q=project(p);ctx.lineTo(q[0],q[1])}ctx.stroke();ctx.beginPath();for(let p of [[-6,0,i],[6,0,i]]){let q=project(p);ctx.lineTo(q[0],q[1])}ctx.stroke()}
-let triangles=[];for(let p of model.parts)for(let tri of local){let v=tri.map(q=>world(add(rotate(q.map((x,i)=>x*p.s[i]),p.r),p.p),p.bone)),q=v.map(project);let A=v[1].map((x,i)=>x-v[0][i]),B=v[2].map((x,i)=>x-v[0][i]),N=[A[1]*B[2]-A[2]*B[1],A[2]*B[0]-A[0]*B[2],A[0]*B[1]-A[1]*B[0]],n=Math.hypot(...N)||1,light=.63+.37*Math.max(0,(N[0]*.4+N[1]*.85+N[2]*.34)/n);triangles.push({q,depth:q.reduce((s,x)=>s+x[2],0)/3,color:'rgb('+p.color.map(x=>Math.round(Math.min(255,x*255*light+10))).join(',')+')'})}
-triangles.sort((a,b)=>a.depth-b.depth);for(let t of triangles){ctx.fillStyle=t.color;ctx.beginPath();t.q.forEach(q=>ctx.lineTo(q[0],q[1]));ctx.closePath();ctx.fill()}
+let triangles=[];for(let p of model.parts)for(let tri of p.geometry){let v=tri.map(q=>world(add(rotate(q.map((x,i)=>x*p.s[i]),p.r),p.p),p.bone)),q=v.map(project);let A=v[1].map((x,i)=>x-v[0][i]),B=v[2].map((x,i)=>x-v[0][i]),N=[A[1]*B[2]-A[2]*B[1],A[2]*B[0]-A[0]*B[2],A[0]*B[1]-A[1]*B[0]],n=Math.hypot(...N)||1,light=.63+.37*Math.max(0,(N[0]*.4+N[1]*.85+N[2]*.34)/n);triangles.push({vertices:v,rgb:p.color.map(x=>Math.min(1,x*light+10/255)),q,depth:q.reduce((s,x)=>s+x[2],0)/3,color:'rgb('+p.color.map(x=>Math.round(Math.min(255,x*255*light+10))).join(',')+')'})}
+drawMesh(triangles);
 document.getElementById('stats').textContent=`${model.bones.length} 關節 · ${model.parts.length} 部件 · ${speed<.2?'待機':speed<5?'行走':'奔跑'}`;requestAnimationFrame(frame)}requestAnimationFrame(frame);
 </script>

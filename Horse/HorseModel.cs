@@ -9,9 +9,9 @@ namespace TonyMods
     {
         [Serializable] public sealed class Definition { public Bone[] bones; public Piece[] parts; }
         [Serializable] public sealed class Bone { public string name, parent; public float[] p; }
-        [Serializable] public sealed class Piece { public string name, bone; public float[] p, s, r, color; }
+        [Serializable] public sealed class Piece { public string name, bone; public float[] p, s, r, color, vertices; public int[] triangles; }
         private readonly Dictionary<string, Transform> bones = new Dictionary<string, Transform>();
-        private Mesh mesh;
+        private readonly List<Mesh> meshes = new List<Mesh>();
         private Material material;
         private Vector3 previous;
         private float speed, phase;
@@ -30,11 +30,11 @@ namespace TonyMods
         {
             Definition data;
             using (var stream = typeof(HorseModel).Assembly.GetManifestResourceStream("Tony.Horse.model.json"))
-            using (var reader = new System.IO.StreamReader(stream)) data = JsonUtility.FromJson<Definition>(reader.ReadToEnd());
+            using (var reader = new System.IO.StreamReader(stream)) data = Newtonsoft.Json.JsonConvert.DeserializeObject<Definition>(reader.ReadToEnd());
             Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
             if (shader == null) throw new InvalidOperationException("Horse shader unavailable");
             material = new Material(shader);
-            mesh = FacetedMesh();
+            material.SetFloat("_Smoothness", .24f);
             foreach (Bone b in data.bones)
             {
                 Transform node = new GameObject(b.name).transform;
@@ -47,6 +47,7 @@ namespace TonyMods
                 go.transform.SetParent(bones[p.bone], false);
                 go.transform.localPosition = V(p.p); go.transform.localScale = V(p.s);
                 go.transform.localRotation = Quaternion.Euler(V(p.r));
+                Mesh mesh = AuthoredMesh(p); meshes.Add(mesh);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
                 MeshRenderer renderer = go.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material;
                 var block = new MaterialPropertyBlock();
@@ -54,28 +55,23 @@ namespace TonyMods
                 block.SetColor("_Color", color); block.SetColor("_BaseColor", color); renderer.SetPropertyBlock(block);
             }
         }
-        // Eight-sided ellipsoid with flat triangle normals. Shared by all body pieces.
-        private static Mesh FacetedMesh()
+        // Each part carries its own authored topology, shared with the preview.
+        private static Mesh AuthoredMesh(Piece p)
         {
-            var vertices = new List<Vector3>();
-            var indices = new List<int>();
-            for (int ring = 0; ring < 6; ring++)
-                for (int side = 0; side < 10; side++)
-                {
-                    Vector3 a = Point(ring, side), b = Point(ring + 1, side);
-                    Vector3 c = Point(ring + 1, side + 1), d = Point(ring, side + 1);
-                    AddTriangle(vertices, indices, a, c, b); AddTriangle(vertices, indices, a, d, c);
-                }
-            Mesh m = new Mesh(); m.name = "Tony Original Horse Facets";
-            m.SetVertices(vertices); m.SetTriangles(indices, 0); m.RecalculateNormals(); m.RecalculateBounds(); return m;
+            if (p.vertices == null || p.vertices.Length % 3 != 0 || p.triangles == null)
+                throw new InvalidOperationException("Invalid horse geometry: " + p.name);
+            var vertices = new Vector3[p.vertices.Length / 3];
+            for (int i = 0; i < vertices.Length; i++)
+                vertices[i] = new Vector3(p.vertices[i*3], p.vertices[i*3+1], p.vertices[i*3+2]);
+            // Split corners for the reference's clean, faceted art direction.
+            var corners = new Vector3[p.triangles.Length];
+            var indices = new int[corners.Length];
+            for (int i = 0; i < corners.Length; i++)
+            { corners[i] = vertices[p.triangles[i]]; indices[i] = i; }
+            Mesh result = new Mesh(); result.name = "Tony Horse " + p.name;
+            result.vertices = corners; result.triangles = indices;
+            result.RecalculateNormals(); result.RecalculateBounds(); return result;
         }
-        private static Vector3 Point(int ring, int side)
-        {
-            float latitude = Mathf.PI * ring / 6, longitude = 2 * Mathf.PI * side / 10;
-            return new Vector3(Mathf.Sin(latitude) * Mathf.Cos(longitude), Mathf.Cos(latitude), Mathf.Sin(latitude) * Mathf.Sin(longitude)) * .5f;
-        }
-        private static void AddTriangle(List<Vector3> v, List<int> t, Vector3 a, Vector3 b, Vector3 c)
-        { int i = v.Count; v.Add(a); v.Add(b); v.Add(c); t.Add(i); t.Add(i+1); t.Add(i+2); }
         public void Animate(float dt)
         {
             Vector3 now = transform.position;
@@ -98,6 +94,6 @@ namespace TonyMods
             bones["earL"].localRotation = Quaternion.Euler(0, 0, -10 + (float)Math.Sin(phase * .3) * 6);
             bones["earR"].localRotation = Quaternion.Euler(0, 0, 10 - (float)Math.Sin(phase * .3) * 6);
         }
-        private void OnDestroy() { if (mesh != null) Destroy(mesh); if (material != null) Destroy(material); }
+        private void OnDestroy() { foreach (Mesh mesh in meshes) if (mesh != null) Destroy(mesh); if (material != null) Destroy(material); }
     }
 }
