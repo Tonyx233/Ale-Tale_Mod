@@ -1,4 +1,4 @@
-# Tony Ale & Tale Mods 0.5.0
+# Tony Ale & Tale Mods 0.5.4
 
 Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機與雙人馬共用一個 DLL。
 
@@ -22,7 +22,7 @@ Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機�
 
 此電腦沿用 TONY_BIG_SET.dll 檔名，plugin GUID 保持不變以相容既有血量設定；不要同時放兩份 DLL。
 DLL 內包含模組程式、播放器 helper 與 WebView2 SDK 元件。
-首次開啟播放器會解出元件到 `BepInEx/cache/TonyAleTaleMods/0.2.0/`。
+首次開啟播放器會解出元件到 `BepInEx/cache/TonyAleTaleMods/0.5.4/`。
 WebView2 Runtime 是額外系統依賴，瀏覽器資料位於 `%LOCALAPPDATA%/TonyAleTaleMods/WebView2/`。
 請從 Microsoft 官方安裝 Runtime，本模組不會自動安裝系統元件。
 
@@ -32,7 +32,7 @@ WebView2 Runtime 是額外系統依賴，瀏覽器資料位於 `%LOCALAPPDATA%/T
 
 1. 存檔、退出遊戲後更新 DLL，重新啟動。
 2. 操作點唱機，按畫面上方 YouTube。
-3. 貼網址並按 Play；若未自動播放，按影片內的播放按鈕。
+3. 在 Windows 原生網址欄貼網址，按 Play 或 Enter；支援 Backspace、Delete、Ctrl+A、Ctrl+V，Clear 清空網址。若未自動播放，按影片內的播放按鈕。
 4. 使用 YouTube 原生控制項調整音量、進度與暫停；Stop 清空播放器。
 5. Close 返回原生介面。原生音樂需自行重新播放。
 
@@ -48,6 +48,7 @@ WebView2 Runtime 是額外系統依賴，瀏覽器資料位於 `%LOCALAPPDATA%/T
 .\build.ps1
 .\build.ps1 -GamePath 'D:\SteamLibrary\steamapps\common\Ale and Tale Tavern'
 .\tests\run.ps1 -WebView
+.\tests\run.ps1 -Playback -VideoId ytQ3Hs3WjQ4
 ```
 
 使用 Windows .NET Framework compiler，引用本機遊戲 assemblies。
@@ -55,7 +56,8 @@ WebView2 Runtime 是額外系統依賴，瀏覽器資料位於 `%LOCALAPPDATA%/T
 WebView2 元件與 helper 嵌入最終 DLL，遊戲 assemblies 不隨套件發布。
 
 已驗證：編譯、17 個網址解析案例、WebView2 初始化與頁面 JavaScript、父視窗掛載與 STOP／EXIT 清理。
-尚待實機驗證：遊戲內對位、輸入焦點、YouTube 影片實際播放、關閉及全螢幕切換。
+0.5.4 改用具有 HTTPS 來源的本機容器頁面，讓 iframe 自動帶入 Referer，並回報 PLAYER_READY、PLAYER_STATE、PLAYER_ERROR。已實測兩支 YouTube 影片到達 PLAYER_STATE 1；原生文字框 Backspace、Delete、選取刪除、Clear 及父視窗掛載／STOP／EXIT 通過測試。
+尚待實機驗證：遊戲內對位、遊戲與播放器之間的輸入焦點、關閉及全螢幕切換。
 血量面板多人同步亦需兩名玩家驗證。
 
 [血量面板設定](TeammateHealthBars/README.md)

@@ -16,8 +16,8 @@ namespace TonyMods
         private JukeboxUI jukeboxUI;
         private Harmony harmony;
         private Process host;
-        private string url = "";
-        private string message = "Paste a YouTube video URL. Playback is local to this player.";
+        private string message = "Paste a YouTube video URL in the player below.";
+        private volatile bool stopNativeAudio;
         private bool open;
         private bool failed;
         private float nextBounds;
@@ -72,27 +72,8 @@ namespace TonyMods
             Rect r = PanelRect();
             GUI.Box(r, "YouTube Jukebox");
             if (GUI.Button(new Rect(r.xMax - 85, r.y + 7, 75, 25), "Close")) { ClosePlayer(); return; }
-            url = GUI.TextField(new Rect(r.x + 12, r.y + 38, r.width - 192, 28), url, 2048);
-            if (GUI.Button(new Rect(r.xMax - 172, r.y + 38, 75, 28), "Play")) Play();
-            if (GUI.Button(new Rect(r.xMax - 90, r.y + 38, 78, 28), "Stop")) Send("STOP");
-            GUI.Label(new Rect(r.x + 12, r.y + 70, r.width - 24, 44), message);
+            if (failed) GUI.Label(new Rect(r.x + 12, r.y + 38, r.width - 24, 60), message);
             if (failed && GUI.Button(new Rect(r.x + 12, r.y + 120, 160, 32), "Retry browser")) { failed = false; StartHost(); }
-        }
-
-        private void Play()
-        {
-            string id;
-            if (!YouTubeUrl.TryGetVideoId(url, out id))
-            {
-                message = "Enter a valid youtube.com/watch or youtu.be video URL.";
-                return;
-            }
-            if (host == null || host.HasExited) StartHost();
-            if (host == null) return;
-            // Stop this machine's native jukebox audio without sending a server command.
-            if (jukeboxUI != null && jukeboxUI.jukebox != null) jukeboxUI.jukebox.Stop();
-            Send("PLAY " + id);
-            message = "Use the YouTube controls below. Some videos cannot be embedded.";
         }
 
         private void StartHost()
@@ -102,7 +83,7 @@ namespace TonyMods
             {
                 IntPtr handle = Process.GetCurrentProcess().MainWindowHandle;
                 if (handle == IntPtr.Zero) throw new InvalidOperationException("Game window handle unavailable.");
-                string directory = Path.Combine(Paths.CachePath, "TonyAleTaleMods", "0.2.0");
+                string directory = Path.Combine(Paths.CachePath, "TonyAleTaleMods", "0.5.4");
                 Directory.CreateDirectory(directory);
                 foreach (string file in payload)
                 {
@@ -126,6 +107,7 @@ namespace TonyMods
                 host.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
                 {
                     if (e.Data != null) log.LogInfo("YouTube browser: " + e.Data);
+                    if (e.Data != null && e.Data.StartsWith("LOCAL_PLAY ", StringComparison.Ordinal)) stopNativeAudio = true;
                 };
                 host.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
                 {
@@ -148,6 +130,12 @@ namespace TonyMods
         private void Update()
         {
             if (!open) return;
+            if (stopNativeAudio)
+            {
+                stopNativeAudio = false;
+                // Unity objects must only be accessed on the game thread.
+                if (jukeboxUI != null && jukeboxUI.jukebox != null) jukeboxUI.jukebox.Stop();
+            }
             if (jukeboxUI == null || !jukeboxUI.isActiveAndEnabled || PlayerNet.Instance == null) { ClosePlayer(); return; }
             if (host != null && host.HasExited)
             {
@@ -171,8 +159,8 @@ namespace TonyMods
             Rect r = PanelRect();
             float sx = (client.Right - client.Left) / (float)Screen.width;
             float sy = (client.Bottom - client.Top) / (float)Screen.height;
-            Send("RECT " + (int)((r.x + 12) * sx) + " " + (int)((r.y + 118) * sy) + " " +
-                Math.Max(200, (int)((r.width - 24) * sx)) + " " + Math.Max(200, (int)((r.height - 130) * sy)));
+            Send("RECT " + (int)((r.x + 12) * sx) + " " + (int)((r.y + 38) * sy) + " " +
+                Math.Max(200, (int)((r.width - 24) * sx)) + " " + Math.Max(200, (int)((r.height - 50) * sy)));
         }
 
         private void Send(string command)
@@ -199,7 +187,7 @@ namespace TonyMods
             finally { running.Dispose(); }
         }
 
-        private void ClosePlayer() { open = false; StopHost(); }
+        private void ClosePlayer() { open = false; StopHost(); stopNativeAudio = false; }
         private void OnDestroy()
         {
             ClosePlayer();
