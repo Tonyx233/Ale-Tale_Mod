@@ -26,6 +26,17 @@ class HorseTests
         foreach(string bad in new[]{null,"","1","1,1","1,2,3","-1,2","18446744073709551616,2"})
         {string before=copy.Encode();Check(!copy.Decode(bad)&&copy.Encode()==before,"Invalid snapshot is atomic");}
         Check(seats.Board(HorseSeats.Empty)==-1,"Reserved ID rejected");
+        // Exercise both host/client boarding orders, including NGO's host ID zero.
+        foreach (ulong first in new ulong[] { 0, 1 })
+        {
+            ulong second = 1 - first;
+            var shared = new HorseSeats();
+            Check(shared.Board(first)==0 && shared.Board(second)==1,"Host/client both boarding orders");
+            var remote = new HorseSeats();
+            Check(remote.Decode(shared.Encode()) && remote.Find(second)==1 && remote.Find(first)==0,"Passenger survives wire snapshot");
+            shared.Remove(second);
+            Check(shared.Board(second)==1 && shared.Find(first)==0,"Passenger can dismount and reboard without moving driver");
+        }
         for(int i=0;i<4;i++)for(int step=0;step<360;step++)foreach(float run in new[]{0f,.5f,1f})
         {
             double phase=step*Math.PI/180+HorseGait.Offset(i,run);

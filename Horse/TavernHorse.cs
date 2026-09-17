@@ -194,17 +194,19 @@ namespace TonyMods
             }
             else if (packet.op == 1)
             {
-                if (cart == null || Vector3.Distance(player.transform.position, vehiclePosition) > MountRange) return;
+                if (cart == null) { Note(sender, "Horse is not ready. Try again."); return; }
+                if (Vector3.Distance(player.transform.position, vehiclePosition) > MountRange)
+                { Note(sender, "Move closer to the horse (within 3m)."); return; }
                 foreach (var other in all) if (other != this && other.HasRider(sender)) return;
-                RaycastHit hit;
-                if (Physics.Linecast(player.transform.position + Vector3.up, vehiclePosition + Vector3.up, out hit, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) &&
-                    !hit.transform.IsChildOf(cart.transform) && !hit.transform.IsChildOf(player.transform)) return;
+                if (MountPathBlocked(player))
+                { Note(sender, "Path to horse is blocked. Approach from another side."); return; }
                 bool newRider = seats.Find(sender) < 0;
                 int assigned = seats.Board(sender);
                 if (assigned < 0) Note(sender, "Horse is full (2/2).");
                 else if (assigned == 0 && newRider) driverGraceUntil = Time.unscaledTime + 0.75f;
                 if (parkedCollider != null) parkedCollider.enabled = seats.Count == 0;
                 if (sender == network.LocalClientId) ApplySeat();
+                if (assigned >= 0) log.LogInfo("Horse mount accepted: horse=" + Id + "; client=" + sender + "; seat=" + (assigned + 1));
             }
             else if (packet.op == 2 && seats.Find(sender) >= 0)
             {
@@ -215,6 +217,30 @@ namespace TonyMods
                 else Send(sender, new Wire { op = 5, position = exit });
             }
             Broadcast();
+        }
+        private bool MountPathBlocked(PlayerNet player)
+        {
+            Vector3 start = player.transform.position + Vector3.up;
+            Vector3 delta = vehiclePosition + Vector3.up - start;
+            if (delta.sqrMagnitude < 0.0001f) return false;
+            // Inspect every hit: ignoring a rider must not hide a wall behind them.
+            foreach (RaycastHit hit in Physics.RaycastAll(start, delta.normalized, delta.magnitude,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                Transform obstacle = hit.transform;
+                if (obstacle == null || obstacle.IsChildOf(cart.transform) || obstacle.IsChildOf(player.transform)) continue;
+                bool seatedRider = false;
+                for (int i = 0; i < HorseSeats.Capacity; i++)
+                {
+                    if (seats[i] == HorseSeats.Empty) continue;
+                    PlayerNet occupant = Player(seats[i]);
+                    if (occupant != null && obstacle.IsChildOf(occupant.transform)) { seatedRider = true; break; }
+                }
+                if (seatedRider) continue;
+                log.LogInfo("Horse mount blocked: horse=" + Id + "; client=" + player.OwnerClientId + "; collider=" + obstacle.name);
+                return true;
+            }
+            return false;
         }
         private void Note(ulong target, string text) { if (target == network.LocalClientId) Tell(text); else Send(target, new Wire { op = 6, message = text }); }
         private void Broadcast()
