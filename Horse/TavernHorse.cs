@@ -275,7 +275,7 @@ namespace TonyMods
             controller = rider.GetComponent<CharacterController>();
             if (movement == null || controller == null) { rider = null; movement = null; return; }
             parkedCollider.enabled = false;
-            localSeat = wanted; originalViewOffset = movement.fpViewHeightOffset; movement.fpViewHeightOffset += .72f; originalRadius = controller.radius; controllerEnabled = controller.enabled;
+            localSeat = wanted; originalViewOffset = movement.fpViewHeightOffset; movement.fpViewHeightOffset += 1.12f; originalRadius = controller.radius; controllerEnabled = controller.enabled;
             UpdateRiderView(movement);
             handsVisible = movement.fpHands != null && movement.fpHands.gameObject.activeSelf;
             if (movement.fpHands != null) movement.fpHands.gameObject.SetActive(false);
