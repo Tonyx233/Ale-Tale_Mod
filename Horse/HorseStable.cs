@@ -103,7 +103,7 @@ namespace TonyMods
         private void Send(ulong id, string json)
         {
             using (var writer = new FastBufferWriter(32768, Allocator.Temp))
-            { writer.WriteValueSafe(json); network.CustomMessagingManager.SendNamedMessage(Channel, id, writer, NetworkDelivery.ReliableSequenced); }
+            { writer.WriteValueSafe(json); network.CustomMessagingManager.SendNamedMessage(Channel, id, writer, NetworkDelivery.ReliableFragmentedSequenced); }
         }
         private void Receive(ulong sender, FastBufferReader reader)
         {
