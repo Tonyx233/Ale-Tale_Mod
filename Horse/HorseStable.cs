@@ -36,7 +36,8 @@ namespace TonyMods
         private string loadKey;
         private bool itemReady;
         private bool loaded;
-        private float nextManifest, noticeUntil;
+        private float nextManifest, noticeUntil, nextSyncWarning;
+        private bool receivedManifest;
         private string notice;
         private Sprite icon;
         private Texture2D iconTexture;
@@ -72,7 +73,8 @@ namespace TonyMods
             {
                 Disconnect(); network = net;
                 network.CustomMessagingManager.RegisterNamedMessageHandler(Channel, Receive);
-                nextManifest = 0;
+                nextManifest = 0; nextSyncWarning = Time.unscaledTime + 10; receivedManifest = false;
+                log.LogInfo("Horse sync 0.5.3 bound; server=" + network.IsServer);
             }
             if (network.IsServer && !loaded && PlayerNet.Instance != null && PlayerNet.Instance.IsSpawned)
             {
@@ -87,6 +89,11 @@ namespace TonyMods
                     if (riding && pose == null) pose = player.gameObject.AddComponent<HorseRiderPose>();
                     if (pose != null) pose.Riding = riding;
                 }
+            if (!network.IsServer && !receivedManifest && Time.unscaledTime >= nextSyncWarning)
+            {
+                nextSyncWarning = Time.unscaledTime + 30;
+                log.LogWarning("Horse sync: no valid manifest from host; ensure both players use 0.5.3.");
+            }
             if (Time.unscaledTime >= nextManifest)
             {
                 nextManifest = Time.unscaledTime + 1;
@@ -106,14 +113,24 @@ namespace TonyMods
                 string json; reader.ReadValueSafe(out json, false);
                 if (network.IsServer)
                 {
-                    if (json == "hello" && network.ConnectedClientsIds.Contains(sender)) peers[sender] = Time.unscaledTime;
+                    if (json == "hello" && network.ConnectedClientsIds.Contains(sender))
+                    {
+                        if (!peers.ContainsKey(sender)) log.LogInfo("Horse sync: peer handshake " + sender);
+                        peers[sender] = Time.unscaledTime;
+                    }
                     return;
                 }
                 if (sender != NetworkManager.ServerClientId) return;
                 if (json.StartsWith("note:", StringComparison.Ordinal)) { Tell(json.Substring(5)); return; }
-                Snapshot snapshot = JsonUtility.FromJson<Snapshot>(json);
-                if (!Valid(snapshot)) return;
+                Snapshot snapshot = HorseJson.Deserialize<Snapshot>(json);
+                if (!Valid(snapshot))
+                {
+                    if (Time.unscaledTime >= nextSyncWarning) { nextSyncWarning = Time.unscaledTime + 30; log.LogWarning("Horse sync: invalid manifest from host; ensure matching 0.5.3 DLLs."); }
+                    return;
+                }
                 foreach (Record record in snapshot.horses) if (!horses.ContainsKey(record.id)) Spawn(record);
+                if (!receivedManifest) log.LogInfo("Horse sync: first valid manifest; horses=" + snapshot.horses.Length);
+                receivedManifest = true;
                 var keep = new HashSet<string>(snapshot.horses.Select(h => h.id));
                 foreach (string id in horses.Keys.ToArray()) if (!keep.Contains(id)) { Destroy(horses[id].gameObject); horses.Remove(id); }
             }
@@ -121,7 +138,7 @@ namespace TonyMods
         }
         private void Broadcast()
         {
-            string json = JsonUtility.ToJson(Capture());
+            string json = HorseJson.Serialize(Capture());
             foreach (ulong id in network.ConnectedClientsIds)
             {
                 float at;
@@ -291,7 +308,7 @@ namespace TonyMods
             {
                 string key=Key(subscribedSave.saveData);if(key==null)return;
                 string file=SavePath(key);Directory.CreateDirectory(Path.GetDirectoryName(file));
-                string temp=file+".tmp";File.WriteAllText(temp,JsonUtility.ToJson(Capture(),true),Encoding.UTF8);
+                string temp=file+".tmp";File.WriteAllText(temp,HorseJson.Serialize(Capture()),Encoding.UTF8);
                 if(File.Exists(file))File.Replace(temp,file,file+".bak");else File.Move(temp,file);
             }
             catch(Exception ex){log.LogError("Horse save failed: "+ex);Tell("Horse save failed. See BepInEx log.");}
@@ -303,7 +320,7 @@ namespace TonyMods
             {
                 string file=SavePath(loadKey);if(!File.Exists(file))return;
                 if(new FileInfo(file).Length>65536)throw new InvalidDataException("Horse save too large");
-                Snapshot s=JsonUtility.FromJson<Snapshot>(File.ReadAllText(file));if(!Valid(s))throw new InvalidDataException("Invalid horse save");
+                Snapshot s=HorseJson.Deserialize<Snapshot>(File.ReadAllText(file));if(!Valid(s))throw new InvalidDataException("Invalid horse save");
                 foreach(Record r in s.horses)Spawn(r);
                 log.LogInfo("Restored "+s.horses.Length+" horses for this save snapshot.");
             }

@@ -140,7 +140,7 @@ namespace TonyMods
         }
         private void Send(ulong target, Wire packet)
         {
-            string json = JsonUtility.ToJson(packet);
+            string json = HorseJson.Serialize(packet);
             using (FastBufferWriter writer = new FastBufferWriter(4096, Allocator.Temp))
             { writer.WriteValueSafe(json); network.CustomMessagingManager.SendNamedMessage(Channel, target, writer, NetworkDelivery.ReliableSequenced); }
         }
@@ -151,7 +151,7 @@ namespace TonyMods
                 if (reader.Length > 4096) return;
                 string json; reader.ReadValueSafe(out json, false);
                 if (json.Length > 1800) return;
-                Wire packet = JsonUtility.FromJson<Wire>(json);
+                Wire packet = HorseJson.Deserialize<Wire>(json);
                 if (packet == null) return;
                 if (network.IsServer) ServerRequest(sender, packet);
                 else if (sender == NetworkManager.ServerClientId)
