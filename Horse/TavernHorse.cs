@@ -62,6 +62,7 @@ namespace TonyMods
         private Quaternion vehicleRotation = Quaternion.identity;
         private int localSeat = -1, consumeFrame = -1, serial, receivedSerial = -1, cartScene = -1;
         private float nextHello, nextState, noticeUntil, lastStateAt, driverGraceUntil;
+        private float fallSpeed;
 
         private string notice = "";
         [Serializable] private sealed class Wire
@@ -195,6 +196,8 @@ namespace TonyMods
             lastRequest[sender] = Time.unscaledTime;
             PlayerNet player = Player(sender);
             if (!Alive(player)) return;
+            if ((packet.op == 7 || packet.op == 8) && HasRider(sender) && IsAirborne())
+            { Note(sender, "Wait until the horse lands before changing seats."); return; }
             if (packet.op == 7 || packet.op == 8)
             {
                 int target = packet.op == 7 ? 0 : 1;
@@ -294,7 +297,7 @@ namespace TonyMods
             movement.characterVelocity = Vector3.zero; movement.isAutoRunning = false;
             passengerPitch = passengerYaw = 0;
             lastPosition = rider.transform.position;
-            Tell(wanted == 0 ? "Driver: WASD | Shift boost | E exit" : "Passenger | E exit | Ctrl+F1: driver");
+            Tell(wanted == 0 ? "Driver: WASD | Shift boost | Jump key | E exit" : "Passenger | E exit | Ctrl+F1: driver");
         }
         private void RestoreRider()
         {
@@ -345,13 +348,14 @@ namespace TonyMods
             if (cart == null || network == null) return;
             // Driver already uses the game's owner-authoritative NetworkTransform.
             FollowDriver();
+            if (network.IsServer) SettleWithoutDriver(Time.deltaTime);
             Vector3 delta = vehiclePosition - cart.transform.position;
             if (!network.IsServer && localSeat != 0)
                 cart.transform.SetPositionAndRotation(Vector3.Lerp(cart.transform.position, vehiclePosition, Mathf.Clamp01(Time.unscaledDeltaTime * 15)), Quaternion.Slerp(cart.transform.rotation, vehicleRotation, Mathf.Clamp01(Time.unscaledDeltaTime * 15)));
             else cart.transform.SetPositionAndRotation(vehiclePosition, vehicleRotation);
             parkedCollider.enabled = seats.Count == 0;
             cart.SetActive(SceneName == SceneManager.GetActiveScene().name);
-            if (model != null) model.Animate(Time.deltaTime);
+            if (model != null) model.Animate(Time.deltaTime, IsAirborne());
             if (localSeat > 0 && rider != null)
             {
                 rider.transform.position = cart.transform.position + cart.transform.rotation * offsets[localSeat];
@@ -367,6 +371,41 @@ namespace TonyMods
             }
         }
         private sealed class SpeedState { public float ground, air; }
+        private bool GroundBelow(float distance, out RaycastHit ground)
+        {
+            ground = new RaycastHit();
+            float closest = Single.PositiveInfinity;
+            foreach (RaycastHit hit in Physics.RaycastAll(vehiclePosition + Vector3.up * .2f, Vector3.down,
+                distance + .2f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.transform == null || (cart != null && hit.transform.IsChildOf(cart.transform)) ||
+                    hit.transform.GetComponentInParent<PlayerNet>() != null || hit.normal.y < .3f) continue;
+                if (hit.distance < closest) { closest = hit.distance; ground = hit; }
+            }
+            return closest < Single.PositiveInfinity;
+        }
+        private bool IsAirborne()
+        {
+            if (localSeat == 0 && movement != null) return !movement.isGrounded;
+            RaycastHit ground;
+            return !GroundBelow(.25f, out ground);
+        }
+        private void SettleWithoutDriver(float dt)
+        {
+            // A driver dying/disconnecting in midair must not leave a floating horse.
+            if (SceneName != SceneManager.GetActiveScene().name) return;
+            if (Alive(Player(seats[0]))) { fallSpeed = 0; return; }
+            dt = Mathf.Clamp(dt, 0, .1f);
+            fallSpeed = Mathf.Min(fallSpeed + 20f * dt, 20f);
+            float drop = fallSpeed * dt;
+            RaycastHit ground;
+            if (GroundBelow(drop + .1f, out ground))
+            {
+                vehiclePosition.y = Mathf.Min(vehiclePosition.y, ground.point.y + .06f);
+                fallSpeed = 0;
+            }
+            else vehiclePosition.y -= drop;
+        }
         private static bool BeforeMove(PlayerMovement __instance, out SpeedState __state)
         {
             __state = null; TavernHorse self = Active;
@@ -386,6 +425,12 @@ namespace TonyMods
         {
             TavernHorse self=Active ?? Nearest;
             if (self == null || !self.enabledSetting.Value) return true;
+            if (__originalMethod.Name == "GetJumpInputDown" || __originalMethod.Name == "GetJumpInputHeld")
+            {
+                // Let native movement handle grounding, impulse and gravity; passengers never drive it.
+                if (self.localSeat < 0 || (self.localSeat == 0 && CanInput())) return true;
+                __result = false; return false;
+            }
             if (self.localSeat >= 0 || (__originalMethod.Name.StartsWith("GetUse",StringComparison.Ordinal) &&
                 (self.consumeFrame==Time.frameCount || (CanInput()&&Input.GetKey(self.mountKey.Value)&&self.NearCart())))) { __result=false; return false; }
             return true;
@@ -394,7 +439,7 @@ namespace TonyMods
         private void OnGUI()
         {
             if (network==null || !enabledSetting.Value || (Active != this && Nearest != this)) return;
-            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift | E exit | Ctrl+F2: passenger" : localSeat>0 ? "Passenger | E exit | Ctrl+F1: driver" : CanInput()&&NearCart() ? "E: Mount horse ("+seats.Count+"/2)" : "";
+            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift | Jump key | E exit | Ctrl+F2: passenger" : localSeat>0 ? "Passenger | E exit | Ctrl+F1: driver" : CanInput()&&NearCart() ? "E: Mount horse ("+seats.Count+"/2)" : "";
             if (!String.IsNullOrEmpty(text)) GUI.Box(new Rect(Screen.width/2-270,Screen.height-175,540,35),text);
         }
         private void OnDestroy() { Unbind(); all.Remove(this); }

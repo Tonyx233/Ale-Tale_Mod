@@ -14,7 +14,7 @@ namespace TonyMods
         private readonly List<Mesh> meshes = new List<Mesh>();
         private Material material;
         private Vector3 previous;
-        private float speed, phase;
+        private float speed, phase, airborneBlend;
         private bool started;
         public float SaddleBob { get { return bones.ContainsKey("body") ? bones["body"].localPosition.y : 0; } }
 
@@ -73,7 +73,7 @@ namespace TonyMods
             result.vertices = corners; result.triangles = indices;
             result.RecalculateNormals(); result.RecalculateBounds(); return result;
         }
-        public void Animate(float dt)
+        public void Animate(float dt, bool airborne)
         {
             Vector3 now = transform.position;
             float distance = started ? Vector3.ProjectOnPlane(now - previous, Vector3.up).magnitude : 0;
@@ -82,14 +82,15 @@ namespace TonyMods
             speed = Mathf.Lerp(speed, measured, Mathf.Clamp01(dt * 8));
             phase += dt * Mathf.Lerp(.5f, 2.8f, Mathf.Clamp01(speed / 8)) * Mathf.PI * 2;
             float weight = Mathf.Clamp01(speed / .8f), run = Mathf.Clamp01((speed - 4) / 3);
+            airborneBlend = Mathf.MoveTowards(airborneBlend, airborne ? 1f : 0f, dt * 8f);
             for (int i = 0; i < 4; i++)
             {
                 float offset = HorseGait.Offset(i, run);
                 double angle = phase + offset;
-                bones["leg"+i].localRotation = Quaternion.Euler(HorseGait.Upper(angle, weight, run), 0, 0);
-                bones["shin"+i].localRotation = Quaternion.Euler(HorseGait.Lower(angle, weight, run), 0, 0);
+                bones["leg"+i].localRotation = Quaternion.Euler(Mathf.Lerp(HorseGait.Upper(angle, weight, run), -25f, airborneBlend), 0, 0);
+                bones["shin"+i].localRotation = Quaternion.Euler(Mathf.Lerp(HorseGait.Lower(angle, weight, run), 65f, airborneBlend), 0, 0);
             }
-            bones["body"].localPosition = new Vector3(0, (float)Math.Sin(phase * 2) * .035f * weight, 0);
+            bones["body"].localPosition = new Vector3(0, (float)Math.Sin(phase * 2) * .035f * weight * (1f - airborneBlend), 0);
             bones["neck"].localRotation = Quaternion.Euler((float)Math.Sin(phase) * (2 + 4 * weight), 0, 0);
             bones["tail"].localRotation = Quaternion.Euler(8 * weight, (float)Math.Sin(phase * .7) * 12, 0);
             bones["earL"].localRotation = Quaternion.Euler(0, 0, -10 + (float)Math.Sin(phase * .3) * 6);
