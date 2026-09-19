@@ -11,7 +11,7 @@ class HostTests : Form
     Timer timer = new Timer();
     DateTime deadline;
     delegate bool EnumProc(IntPtr hwnd, IntPtr data);
-    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr data);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [STAThread] static int Main(string[] args)
     {
@@ -52,13 +52,13 @@ class HostTests : Form
     }
     void CheckChild()
     {
-        EnumChildWindows(Handle, delegate(IntPtr hwnd, IntPtr data)
+        EnumWindows(delegate(IntPtr hwnd, IntPtr data)
         {
             uint pid; GetWindowThreadProcessId(hwnd, out pid);
             if (pid == (uint)child.Id) checkedChild = true;
             return true;
         }, IntPtr.Zero);
-        Console.WriteLine("CHILD_HWND=" + checkedChild);
+        Console.WriteLine("TOP_LEVEL_HWND=" + checkedChild);
         child.StandardInput.WriteLine("STOP");
         child.StandardInput.WriteLine("EXIT"); child.StandardInput.Flush();
     }

@@ -57,15 +57,21 @@ namespace TonyMods
             parent = parentWindow;
             selfTest = test;
             playbackTest = playback;
-            FormBorderStyle = FormBorderStyle.None;
-            ShowInTaskbar = false;
-            StartPosition = FormStartPosition.Manual;
-            Size = new Size(800, 450);
+            FormBorderStyle = FormBorderStyle.Sizable;
+            ShowInTaskbar = !test;
+            StartPosition = FormStartPosition.CenterScreen;
+            ClientSize = new Size(900, 550);
+            MinimumSize = new Size(640, 360);
+            Text = "YouTube Jukebox - Tony";
             BackColor = Color.FromArgb(20, 20, 20);
             if (test) Opacity = 0;
             browser.Dock = DockStyle.Fill;
             Panel content = new Panel { Dock = DockStyle.Fill };
-            Controls.Add(content);
+            TableLayoutPanel layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            Controls.Add(layout);
+            layout.Controls.Add(content, 0, 1);
             content.Controls.Add(browser);
             status.Dock = DockStyle.Fill;
             status.Text = "Loading YouTube player...";
@@ -73,9 +79,10 @@ namespace TonyMods
             status.BackColor = BackColor;
             status.TextAlign = ContentAlignment.MiddleCenter;
             content.Controls.Add(status);
-            TableLayoutPanel toolbar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 36, ColumnCount = 4, Padding = new Padding(2) };
+            TableLayoutPanel toolbar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1, Padding = new Padding(4) };
             toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 3; i++) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 68));
+            for (int i = 0; i < 4; i++) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 68));
+            toolbar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             address.Dock = DockStyle.Fill;
             address.MaxLength = 2048;
             address.ShortcutsEnabled = true;
@@ -87,8 +94,10 @@ namespace TonyMods
             play.Click += delegate { PlayAddress(); };
             stop.Click += delegate { Command("STOP"); };
             clear.Click += delegate { address.Clear(); address.Focus(); };
-            toolbar.Controls.Add(play, 1, 0); toolbar.Controls.Add(stop, 2, 0); toolbar.Controls.Add(clear, 3, 0);
-            Controls.Add(toolbar);
+            Button paste = new Button { Text = "Paste", Dock = DockStyle.Fill };
+            paste.Click += delegate { try { address.Paste(); address.Focus(); } catch (Exception ex) { Console.WriteLine("PASTE_ERROR " + ex.Message); } };
+            toolbar.Controls.Add(paste, 1, 0); toolbar.Controls.Add(play, 2, 0); toolbar.Controls.Add(stop, 3, 0); toolbar.Controls.Add(clear, 4, 0);
+            layout.Controls.Add(toolbar, 0, 0);
             Shown += Initialize;
             FormClosed += delegate { browser.Dispose(); parentTimer.Dispose(); testTimer.Dispose(); };
         }
@@ -101,17 +110,18 @@ namespace TonyMods
                 if (!selfTest)
                 {
                     if (!IsWindow(parent)) { Close(); return; }
-                    // The helper owns a real child HWND inside the Unity game window.
-                    int style = GetWindowLong(Handle, -16);
-                    SetWindowLong(Handle, -16, (style & unchecked((int)~0x80000000)) | 0x40000000);
-                    SetParent(Handle, parent);
+                    // Keep a normal top-level window so Unity cannot capture textbox input.
+
+
+                    Activate();
+                    address.Focus();
                     Thread input = new Thread(ReadCommands);
                     input.IsBackground = true;
                     input.Start();
                     parentTimer.Interval = 500;
                     parentTimer.Tick += delegate
                     {
-                        if (!IsWindow(parent) || !IsWindowVisible(parent)) Close();
+                        if (!IsWindow(parent)) Close();
                     };
                     parentTimer.Start();
                 }
@@ -222,7 +232,7 @@ namespace TonyMods
                 int x, y, w, h;
                 if (values.Length == 4 && Int32.TryParse(values[0], out x) && Int32.TryParse(values[1], out y) &&
                     Int32.TryParse(values[2], out w) && Int32.TryParse(values[3], out h) && w >= 200 && h >= 200)
-                    Bounds = new Rectangle(x, y, w, h);
+                    return; // Independent window keeps its user-selected bounds.
             }
         }
 
@@ -242,12 +252,24 @@ namespace TonyMods
         {
             string id;
             if (!YouTubeUrl.TryGetVideoId(address.Text, out id))
-            { status.Text = "Enter a valid YouTube video URL."; status.Visible = true; address.Focus(); return; }
+            { Console.WriteLine("INVALID_URL"); status.Text = "Enter a valid YouTube video URL."; status.Visible = true; address.Focus(); return; }
             Play(id);
         }
 
         private void TestTextEditing()
         {
+            foreach (Size size in new[] { new Size(900, 550), new Size(640, 360) })
+            {
+                ClientSize = size; PerformLayout();
+                TableLayoutPanel layout = (TableLayoutPanel)Controls[0];
+                layout.PerformLayout();
+                TableLayoutPanel toolbar = (TableLayoutPanel)layout.GetControlFromPosition(0, 0);
+                toolbar.PerformLayout();
+                foreach (Control control in toolbar.Controls)
+                    if (!control.Visible || control.Width < 30 || control.Height < 18 || !toolbar.ClientRectangle.Contains(control.Bounds))
+                        throw new InvalidOperationException("Toolbar clipped: " + control.Text);
+            }
+            Console.WriteLine("TOOLBAR_LAYOUT=900x550,640x360:PASS");
             address.Text = "abcX"; address.Select(4, 0);
             SendMessage(address.Handle, 0x0102, new IntPtr(8), IntPtr.Zero); // WM_CHAR Backspace
             if (address.Text != "abc") throw new InvalidOperationException("Backspace test failed");

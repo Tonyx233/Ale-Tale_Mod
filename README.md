@@ -8,7 +8,7 @@ Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機�
 
 - 左側中央紅色血量面板，顯示自己與隊友的名字、HP；單人也可用。
 - 打開原生點唱機介面後，畫面上方提供 YouTube 按鈕。
-- 貼上影片網址後按 Play，於操作面板的 WebView2 子視窗顯示影片與聲音。
+- 貼上影片網址後按 Play，於操作面板的 獨立 WebView2 視窗顯示影片與聲音。
 - 支援 watch、youtu.be、shorts、live 與 embed 網址。
 - Close、關閉點唱機介面或退出遊戲會關閉播放器，不提供背景音訊播放。
 - 第一版只有網址播放，不含關鍵字搜尋、佇列、下載或多人同步。
@@ -57,10 +57,16 @@ WebView2 元件與 helper 嵌入最終 DLL，遊戲 assemblies 不隨套件發�
 
 已驗證：編譯、17 個網址解析案例、WebView2 初始化與頁面 JavaScript、父視窗掛載與 STOP／EXIT 清理。
 0.5.4 改用具有 HTTPS 來源的本機容器頁面，讓 iframe 自動帶入 Referer，並回報 PLAYER_READY、PLAYER_STATE、PLAYER_ERROR。已實測兩支 YouTube 影片到達 PLAYER_STATE 1；原生文字框 Backspace、Delete、選取刪除、Clear 及父視窗掛載／STOP／EXIT 通過測試。
-尚待實機驗證：遊戲內對位、遊戲與播放器之間的輸入焦點、關閉及全螢幕切換。
+尚待實機驗證：遊戲內開關、剪貼簿貼上及全螢幕切換。
 血量面板多人同步亦需兩名玩家驗證。
 
 [血量面板設定](TeammateHealthBars/README.md)
 
 雙人馬已通過編譯、座位及步態測試與 API 靜態檢查；尚未做遊戲內雙人、購買、存檔實測。
 [模型動畫預覽](Horse/Assets/preview.html)（下載後用瀏覽器開啟）。
+
+## 0.5.8 點唱機操作修正
+
+播放器改為一般可縮放視窗，不再用 SetParent 嵌入 Unity。工具列採明確的兩列佈局，提供網址欄、Paste、Play、Stop、Clear。支援 Ctrl+V、Enter；網址不合法會記錄 INVALID_URL。Unity 傳來的舊 RECT 指令忽略，保留玩家調整的視窗位置。
+
+驗證：兩種視窗尺寸的工具列可見性與邊界、文字編輯、WebView2 初始化、YouTube PLAYER_STATE 1、146 個非點唱機方法與馬模型保留檢查通過。HostTests.exe 受 Windows 應用程式控制阻擋，生命週期整合測試未完成；仍需遊戲內操作驗證。
