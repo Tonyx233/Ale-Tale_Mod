@@ -141,7 +141,6 @@ namespace TonyMods
             }
             if (Input.GetKeyDown(mountKey.Value) && (localSeat >= 0 || (Active == null && Nearest == this)))
             { consumeFrame = Time.frameCount; Request(localSeat >= 0 ? 2 : 1); }
-            if (localSeat == 0 && movement != null && (movement.isInWater || movement.isOverWater)) Request(2);
         }
         private void Request(int op)
         {
