@@ -16,6 +16,7 @@ namespace TonyMods
         private Vector3 previous;
         private float speed, phase;
         private bool started;
+        public float SaddleBob { get { return bones.ContainsKey("body") ? bones["body"].localPosition.y : 0; } }
 
         public static HorseModel Create(Transform parent)
         {

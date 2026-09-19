@@ -84,10 +84,11 @@ namespace TonyMods
                 foreach (PlayerNet player in PlayerManager.Instance.players.Values)
                 {
                     if (player == null) continue;
-                    bool riding = player.hp.Value > 0 && horses.Values.Any(h => h.HasRider(player.OwnerClientId));
+                    TavernHorse riddenHorse = player.hp.Value > 0 ? horses.Values.FirstOrDefault(h => h.HasRider(player.OwnerClientId)) : null;
+                    bool riding = riddenHorse != null;
                     var pose = player.GetComponent<HorseRiderPose>();
                     if (riding && pose == null) pose = player.gameObject.AddComponent<HorseRiderPose>();
-                    if (pose != null) pose.Riding = riding;
+                    if (pose != null) { pose.Riding = riding; pose.Horse = riddenHorse; }
                 }
             if (!network.IsServer && !receivedManifest && Time.unscaledTime >= nextSyncWarning)
             {

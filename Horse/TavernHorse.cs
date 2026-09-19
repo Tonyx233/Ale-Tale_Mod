@@ -20,6 +20,16 @@ namespace TonyMods
         private static readonly List<TavernHorse> all = new List<TavernHorse>();
         public static IEnumerable<TavernHorse> All { get { return all; } }
         public bool HasRider(ulong id) { return seats.Find(id) >= 0; }
+        public bool TryGetRiderSeat(ulong id, out Vector3 position, out Quaternion rotation)
+        {
+            position = Vector3.zero; rotation = Quaternion.identity;
+            int seat = seats.Find(id);
+            if (seat < 0 || cart == null || !cart.activeInHierarchy) return false;
+            rotation = cart.transform.rotation;
+            float bob = model == null ? 0 : model.SaddleBob;
+            position = cart.transform.TransformPoint(offsets[seat] + Vector3.up * (2.13f + bob));
+            return true;
+        }
         public Vector3 Position { get { return vehiclePosition; } }
         public float Yaw { get { return vehicleRotation.eulerAngles.y; } }
         private const float MountRange = 3f, CartRadius = 0.55f;
@@ -47,7 +57,7 @@ namespace TonyMods
         private PlayerMovement movement;
         private CharacterController controller;
         private float originalRadius, originalViewOffset, passengerPitch, passengerYaw;
-        private bool handsVisible, controllerEnabled;
+        private bool controllerEnabled;
         private Vector3 lastPosition, vehiclePosition;
         private Quaternion vehicleRotation = Quaternion.identity;
         private int localSeat = -1, consumeFrame = -1, serial, receivedSerial = -1, cartScene = -1;
@@ -76,7 +86,7 @@ namespace TonyMods
         public static void InstallPatches(Harmony patches)
         {
             patches.Patch(AccessTools.Method(typeof(PlayerMovement), "HandleCharacterMovement"), prefix: new HarmonyMethod(typeof(TavernHorse), "BeforeMove"), finalizer: new HarmonyMethod(typeof(TavernHorse), "AfterMove"));
-            foreach (string name in new[] { "GetJumpInputDown", "GetJumpInputHeld", "GetDashInputDown", "GetCrouchInputDown", "GetCrouchInputHeld", "GetFireInputDown", "GetFireInputHeld", "GetFireInputReleased", "GetAimInputDown", "GetAimInputHeld", "GetAimInputReleased", "GetDropInputDown", "GetAutoRunInputDown", "GetUseInputDown", "GetUseInput", "GetUseInputUp" })
+            foreach (string name in new[] { "GetJumpInputDown", "GetJumpInputHeld", "GetDashInputDown", "GetCrouchInputDown", "GetCrouchInputHeld", "GetDropInputDown", "GetAutoRunInputDown", "GetUseInputDown", "GetUseInput", "GetUseInputUp" })
                 patches.Patch(AccessTools.Method(typeof(PlayerInput), name), prefix: new HarmonyMethod(typeof(TavernHorse), "FilterAction"));
         }
         private static bool CanInput()
@@ -277,8 +287,6 @@ namespace TonyMods
             parkedCollider.enabled = false;
             localSeat = wanted; originalViewOffset = movement.fpViewHeightOffset; movement.fpViewHeightOffset += 1.12f; originalRadius = controller.radius; controllerEnabled = controller.enabled;
             UpdateRiderView(movement);
-            handsVisible = movement.fpHands != null && movement.fpHands.gameObject.activeSelf;
-            if (movement.fpHands != null) movement.fpHands.gameObject.SetActive(false);
             controller.enabled = false;
             rider.transform.position = vehiclePosition + vehicleRotation * offsets[wanted];
             rider.transform.rotation = vehicleRotation;
@@ -296,7 +304,6 @@ namespace TonyMods
                 movement.fpViewHeightOffset = originalViewOffset;
                 UpdateRiderView(movement);
                 movement.characterVelocity = Vector3.zero; movement.isAutoRunning = false;
-                if (movement.fpHands != null) movement.fpHands.gameObject.SetActive(handsVisible);
             }
             rider = null; movement = null; controller = null; localSeat = -1;
         }
