@@ -1,4 +1,4 @@
-param([switch]$WebView, [switch]$Playback, [string]$VideoId = 'M7lc1UVf-VE')
+param([switch]$WebView, [switch]$Playback, [switch]$Speaker, [string]$VideoId = 'M7lc1UVf-VE')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -7,6 +7,10 @@ New-Item -ItemType Directory -Force (Join-Path $root 'bin') | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Test build failed' }
 & (Join-Path $root 'bin\UrlTests.exe')
 if ($LASTEXITCODE -ne 0) { throw 'URL tests failed' }
+& $compiler /nologo /target:exe ('/out:'+(Join-Path $root 'bin\SpeakerTests.exe')) (Join-Path $PSScriptRoot 'SpeakerTests.cs') (Join-Path $root 'YouTubeJukebox\JukeboxState.cs') (Join-Path $root 'YouTubeJukebox\YouTubeUrl.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Speaker test build failed' }
+& (Join-Path $root 'bin\SpeakerTests.exe')
+if ($LASTEXITCODE -ne 0) { throw 'Speaker state tests failed' }
 & $compiler /nologo /target:exe ('/out:'+(Join-Path $root 'bin\HorseTests.exe')) (Join-Path $PSScriptRoot 'HorseTests.cs') (Join-Path $root 'Horse\HorseSeats.cs') (Join-Path $root 'Horse\HorseGait.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Seat test build failed' }
 & (Join-Path $root 'bin\HorseTests.exe')
@@ -35,4 +39,18 @@ if ($Playback) {
     Get-Content $stdout
     Get-Content $stderr
     if ($process.ExitCode -ne 0 -or !(Select-String -LiteralPath $stdout -SimpleMatch 'PLAYER_STATE 1' -Quiet)) { throw 'Video did not reach playing state' }
+}
+if ($Speaker) {
+    $stdout = Join-Path $root 'bin\speaker-test.log'
+    $process = Start-Process (Join-Path $root 'bin\browser\Tony.JukeboxBrowser.exe') -ArgumentList '--speaker-test' -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError (Join-Path $root 'bin\speaker-error.log')
+    if (!$process.WaitForExit(55000)) { $process.Kill(); throw 'Speaker playback timed out' }
+    Get-Content $stdout
+    if ($process.ExitCode -ne 0 -or !(Select-String -LiteralPath $stdout -SimpleMatch 'SPEAKER_TEST=hidden-progress,pause,seek,volume,resume,reopen,stop:PASS' -Quiet)) { throw 'Speaker playback failed' }
+    & $compiler /nologo /target:exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll ('/out:'+(Join-Path $root 'bin\SpeakerPairTests.exe')) (Join-Path $PSScriptRoot 'SpeakerPairTests.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Speaker pair build failed' }
+    $stdout = Join-Path $root 'bin\pair-test.log'
+    $process = Start-Process (Join-Path $root 'bin\SpeakerPairTests.exe') -ArgumentList ('"'+(Join-Path $root 'bin\browser\Tony.JukeboxBrowser.exe')+'"') -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError (Join-Path $root 'bin\pair-error.log')
+    if (!$process.WaitForExit(58000)) { $process.Kill(); throw 'Speaker pair timed out' }
+    Get-Content $stdout
+    if ($process.ExitCode -ne 0 -or !(Select-String -LiteralPath $stdout -SimpleMatch 'SPEAKER_PAIR_TEST=late-join,clock,independent-volume,pause,cleanup:PASS' -Quiet)) { throw 'Speaker pair failed' }
 }
