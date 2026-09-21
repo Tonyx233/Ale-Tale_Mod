@@ -14,7 +14,7 @@ $hostDir = Join-Path $outDir 'browser'
 New-Item -ItemType Directory -Force $hostDir | Out-Null
 Copy-Item (Join-Path $package 'lib\net462\Microsoft.Web.WebView2.Core.dll'),(Join-Path $package 'lib\net462\Microsoft.Web.WebView2.WinForms.dll'),(Join-Path $package 'runtimes\win-x64\native\WebView2Loader.dll') $hostDir -Force
 $helper = Join-Path $hostDir 'Tony.JukeboxBrowser.exe'
-& $compiler /nologo /target:exe /platform:x64 /optimize+ ('/out:'+$helper) /reference:System.Windows.Forms.dll /reference:System.Drawing.dll ('/reference:'+(Join-Path $hostDir 'Microsoft.Web.WebView2.Core.dll')) ('/reference:'+(Join-Path $hostDir 'Microsoft.Web.WebView2.WinForms.dll')) (Join-Path $PSScriptRoot 'YouTubeJukebox\BrowserHost.cs') (Join-Path $PSScriptRoot 'YouTubeJukebox\YouTubeUrl.cs')
+& $compiler /nologo /target:exe /platform:x64 /optimize+ ('/out:'+$helper) /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll /reference:System.Net.Http.dll ('/reference:'+(Join-Path $hostDir 'Microsoft.Web.WebView2.Core.dll')) ('/reference:'+(Join-Path $hostDir 'Microsoft.Web.WebView2.WinForms.dll')) (Join-Path $PSScriptRoot 'YouTubeJukebox\BrowserHost.cs') (Join-Path $PSScriptRoot 'YouTubeJukebox\BrowserQueue.cs') (Join-Path $PSScriptRoot 'YouTubeJukebox\JukeboxState.cs') (Join-Path $PSScriptRoot 'YouTubeJukebox\YouTubeUrl.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Browser build failed' }
 $managed = Join-Path $GamePath 'Ale and Tale Tavern_Data\Managed'
 $refs = @(Get-ChildItem $managed -Filter '*.dll' | ForEach-Object { '/reference:'+$_.FullName })

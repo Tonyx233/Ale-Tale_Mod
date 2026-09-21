@@ -95,7 +95,7 @@ namespace TonyMods
             {
                 IntPtr handle = Process.GetCurrentProcess().MainWindowHandle;
                 if (handle == IntPtr.Zero) throw new InvalidOperationException("Game window handle unavailable.");
-                string directory = Path.Combine(Paths.CachePath, "TonyAleTaleMods", "0.8.0");
+                string directory = Path.Combine(Paths.CachePath, "TonyAleTaleMods", "0.8.1");
                 Directory.CreateDirectory(directory);
                 foreach (string file in payload)
                 {
@@ -163,7 +163,7 @@ namespace TonyMods
         private void SpeakerCommand(string command)
         {
             if (command == "EXIT") { open = false; StopHost(); return; }
-            if (command.StartsWith("PLAY ", StringComparison.Ordinal) && (host == null || host.HasExited) && Time.unscaledTime >= nextStart) StartHost(false);
+            if ((command.StartsWith("PLAY ", StringComparison.Ordinal) || command.StartsWith("RESOLVE ", StringComparison.Ordinal)) && (host == null || host.HasExited) && Time.unscaledTime >= nextStart) StartHost(false);
             Send(command);
         }
 

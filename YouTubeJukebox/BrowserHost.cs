@@ -10,13 +10,17 @@ using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
+[assembly: System.Reflection.AssemblyVersion("0.8.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.8.1.0")]
+
 namespace TonyMods
 {
-    internal sealed class BrowserHost : Form
+    internal sealed partial class BrowserHost : Form
     {
         private readonly WebView2 browser = new WebView2();
         private readonly Label status = new Label();
         private readonly TextBox address = new TextBox();
+        private readonly Label playlistStatus = new Label();
         private readonly bool playbackTest;
         private const string PlayerOrigin = "https://tony.teammatehealthbars";
         private readonly System.Windows.Forms.Timer testTimer = new System.Windows.Forms.Timer();
@@ -76,19 +80,23 @@ namespace TonyMods
             FormBorderStyle = FormBorderStyle.Sizable;
             ShowInTaskbar = !test;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(900, 550);
-            MinimumSize = new Size(640, 360);
+            ClientSize = new Size(1100, 650);
+            MinimumSize = new Size(1000, 600);
             Text = "YouTube Jukebox - Tony";
             BackColor = Color.FromArgb(20, 20, 20);
             if (test) Opacity = 0;
             browser.Dock = DockStyle.Fill;
             Panel content = new Panel { Dock = DockStyle.Fill };
-            TableLayoutPanel layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+            TableLayoutPanel layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             Controls.Add(layout);
-            layout.Controls.Add(content, 0, 2);
+            var split = new SplitContainer { Width = 1100, Dock = DockStyle.Fill, SplitterDistance = 650, Panel1MinSize = 400, Panel2MinSize = 340 };
+            layout.Controls.Add(split, 0, 3);
+            split.Panel1.Controls.Add(content);
+            BuildQueuePanel(split.Panel2);
             content.Controls.Add(browser);
             status.Dock = DockStyle.Fill;
             status.Text = "Loading YouTube player...";
@@ -96,50 +104,63 @@ namespace TonyMods
             status.BackColor = BackColor;
             status.TextAlign = ContentAlignment.MiddleCenter;
             content.Controls.Add(status);
-            TableLayoutPanel toolbar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1, Padding = new Padding(4) };
+            TableLayoutPanel toolbar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 6, RowCount = 1, Padding = new Padding(4) };
             toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 4; i++) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 68));
+            for (int i = 0; i < 5; i++) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
             toolbar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             address.Dock = DockStyle.Fill;
             address.MaxLength = 2048;
             address.ShortcutsEnabled = true;
             address.KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { PlayAddress(); e.SuppressKeyPress = true; } };
             toolbar.Controls.Add(address, 0, 0);
-            Button play = new Button { Text = "Play", Dock = DockStyle.Fill };
-            Button stop = new Button { Text = "Stop", Dock = DockStyle.Fill };
+            Button play = new Button { Text = "Add last", Dock = DockStyle.Fill };
+            Button insert = new Button { Text = "Play next", Dock = DockStyle.Fill };
+            Button immediate = new Button { Text = "Play now", Dock = DockStyle.Fill };
             Button clear = new Button { Text = "Clear", Dock = DockStyle.Fill };
             play.Click += delegate { PlayAddress(); };
-            stop.Click += delegate { Console.WriteLine("REQUEST_STOP"); };
+            insert.Click += delegate { PlayAddress("insert"); };
+            immediate.Click += delegate { PlayAddress("now"); };
             clear.Click += delegate { address.Clear(); address.Focus(); };
             Button paste = new Button { Text = "Paste", Dock = DockStyle.Fill };
             paste.Click += delegate { try { address.Paste(); address.Focus(); } catch (Exception ex) { Console.WriteLine("PASTE_ERROR " + ex.Message); } };
-            toolbar.Controls.Add(paste, 1, 0); toolbar.Controls.Add(play, 2, 0); toolbar.Controls.Add(stop, 3, 0); toolbar.Controls.Add(clear, 4, 0);
+            toolbar.Controls.Add(paste, 1, 0); toolbar.Controls.Add(play, 2, 0); toolbar.Controls.Add(insert, 3, 0); toolbar.Controls.Add(immediate, 4, 0); toolbar.Controls.Add(clear, 5, 0);
             layout.Controls.Add(toolbar, 0, 0);
-            FlowLayoutPanel transport = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+            FlowLayoutPanel transport = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true };
             Button pause = new Button { Text = "Pause", Width = 65 };
             Button resume = new Button { Text = "Resume", Width = 70 };
             NumericUpDown seconds = new NumericUpDown { Maximum = 604800, Width = 80 };
             Button seek = new Button { Text = "Seek (sec)", Width = 85 };
             Button hide = new Button { Text = "Back to game", Width = 125 };
-            pause.Click += delegate { Console.WriteLine("REQUEST_PAUSE"); };
-            resume.Click += delegate { Console.WriteLine("REQUEST_RESUME"); };
-            seek.Click += delegate { Console.WriteLine("REQUEST_SEEK " + seconds.Value.ToString(CultureInfo.InvariantCulture)); };
+            Button previous = new Button { Text = "Previous", Width = 75 };
+            Button next = new Button { Text = "Next", Width = 60 };
+            Button loop = new Button { Text = "Repeat mode", Width = 100 };
+            Button stop = new Button { Text = "Stop", Width = 60 };
+            previous.Click += delegate { QueueRequest("previous"); };
+            next.Click += delegate { QueueRequest("next"); };
+            loop.Click += delegate { QueueRequest("repeat"); };
+            stop.Click += delegate { QueueRequest("stop"); };
+            pause.Click += delegate { QueueRequest("pause"); };
+            resume.Click += delegate { QueueRequest("resume"); };
+            seek.Click += delegate { QueueRequest("seek",0,0,(double)seconds.Value); };
             hide.Click += delegate { HidePlayer(); };
-            transport.Controls.AddRange(new Control[] { pause, resume, seconds, seek, hide });
+            transport.Controls.AddRange(new Control[] { previous, next, pause, resume, stop, seconds, seek, loop, hide });
             layout.Controls.Add(transport, 0, 1);
+            playlistStatus.Dock = DockStyle.Fill; playlistStatus.ForeColor = Color.White;
+            playlistStatus.Text = "Add last / Play next keep the current song. Play now interrupts it. Controls require 8m proximity.";
+            layout.Controls.Add(playlistStatus, 0, 2);
             Shown += Initialize;
             FormClosing += delegate(object s, FormClosingEventArgs e)
             {
                 if (!selfTest && !allowClose && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; HidePlayer(); }
             };
-            FormClosed += delegate { browser.Dispose(); parentTimer.Dispose(); testTimer.Dispose(); };
+            FormClosed += delegate { resolver.Dispose(); titleClient.Dispose(); browser.Dispose(); parentTimer.Dispose(); testTimer.Dispose(); };
         }
 
         private async void Initialize(object sender, EventArgs args)
         {
             try
             {
-                if (selfTest) TestTextEditing();
+                if (selfTest) { TestTextEditing(); TestQueueControls(); }
                 if (!selfTest)
                 {
                     if (!IsWindow(parent)) { ExitPlayer(); return; }
@@ -163,15 +184,16 @@ namespace TonyMods
                 CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(null, data,
                     new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required"));
                 await browser.EnsureCoreWebView2Async(environment);
+                await InitializeResolver(environment);
                 browser.CoreWebView2.AddWebResourceRequestedFilter(PlayerOrigin + "/*", CoreWebView2WebResourceContext.Document);
                 browser.CoreWebView2.WebResourceRequested += delegate(object s, CoreWebView2WebResourceRequestedEventArgs e)
                 {
                     Uri requestUri = new Uri(e.Request.Uri);
-                    string id;
+                    string id, list; long token;
                     if (requestUri.GetLeftPart(UriPartial.Authority) != PlayerOrigin ||
-                        !YouTubeUrl.TryGetVideoId("https://youtu.be/" + requestUri.Query.TrimStart('?'), out id)) return;
+                        !YouTubeUrl.TryGetPlayback(requestUri.Query.TrimStart('?'), out id, out list, out token)) return;
                     // A real HTTPS document gives the iframe an automatic browser-generated Referer.
-                    byte[] html = Encoding.UTF8.GetBytes(PlayerHtml(id, playbackTest));
+                    byte[] html = Encoding.UTF8.GetBytes(PlayerHtml(id, list, token, playbackTest));
                     e.Response = environment.CreateWebResourceResponse(new MemoryStream(html), 200, "OK",
                         "Content-Type: text/html; charset=utf-8\r\nReferrer-Policy: strict-origin-when-cross-origin\r\nCache-Control: no-store\r\n");
                 };
@@ -179,9 +201,13 @@ namespace TonyMods
                 {
                     if (!e.Source.StartsWith(PlayerOrigin + "/", StringComparison.Ordinal)) return;
                     string value = e.TryGetWebMessageAsString();
+                    // Reject queued events from a page replaced by a newer track.
+                    if (e.Source != PlayerOrigin + "/player?" + pendingVideo) return;
                     Console.WriteLine(value);
+                    if (value.StartsWith("EVENT ", StringComparison.Ordinal))
+                    { int split = value.IndexOf(' ', 6); if (split < 0) return; value = value.Substring(split + 1); }
                     if (value.StartsWith("PLAYER_STATE ", StringComparison.Ordinal)) Int32.TryParse(value.Substring(13), out playerState);
-                    if (value == "PLAYER_STATE 1" && hideWhenPlaying) { hideWhenPlaying = false; Hide(); Console.WriteLine("HIDDEN"); }
+                    if (value == "PLAYER_STATE 1" && hideWhenPlaying && resolveSpec == null) { hideWhenPlaying = false; Hide(); Console.WriteLine("HIDDEN"); }
                     if (value.StartsWith("PLAYER_ERROR ", StringComparison.Ordinal) && hideWhenPlaying) { hideWhenPlaying = false; Hide(); }
                     if (value == "PLAYER_READY") { playerReady = true; if (!selfTest) ApplySync(); }
                     if (speakerTest && value == "PLAYER_STATE 1" && !speakerTestStarted) { speakerTestStarted = true; TestSpeaker(); }
@@ -217,6 +243,7 @@ namespace TonyMods
                     Console.WriteLine(e.IsSuccess ? "NAVIGATION_OK" : "ERROR " + e.WebErrorStatus);
                 };
                 ready = true;
+                if (resolveSpec != null) StartResolve(resolveSpec);
                 Console.WriteLine("READY");
                 if (selfTest)
                 {
@@ -227,7 +254,7 @@ namespace TonyMods
                     else browser.NavigateToString("<html><body><p id='probe'>ready</p></body></html>");
                 }
                 else if (pendingVideo != null) Play(pendingVideo);
-                else status.Text = "Paste a YouTube URL above, then press Play.";
+                else status.Text = "Paste a YouTube video or playlist URL, then choose Add last, Play next, or Play now.";
             }
             catch (Exception ex)
             {
@@ -255,6 +282,18 @@ namespace TonyMods
 
         private async void Command(string command)
         {
+            if (command.StartsWith("QUEUE ", StringComparison.Ordinal)) { ReadQueue(command.Substring(6)); return; }
+            if (command.StartsWith("RESOLVE ", StringComparison.Ordinal)) { StartResolve(command.Substring(8)); return; }
+            if (command == "CANCEL_RESOLVE") { CancelResolve(); return; }
+            if (command == "TRACK_PROBE")
+            {
+                if (playerReady)
+                {
+                    try { Console.WriteLine("TRACK_PROBE " + await browser.CoreWebView2.ExecuteScriptAsync("[player.getVideoData().video_id,player.getCurrentTime(),player.getPlayerState(),player.getDuration()].join(',')")); }
+                    catch (Exception ex) { Console.WriteLine("PROBE_ERROR " + ex.Message); }
+                }
+                return;
+            }
             if (command == "PROBE")
             {
                 if (playerReady)
@@ -265,6 +304,7 @@ namespace TonyMods
                 return;
             }
             if (command == "EXIT") { ExitPlayer(); return; }
+            if (command.StartsWith("META ", StringComparison.Ordinal)) { playlistStatus.Text = command.Substring(5); return; }
             if (command == "HIDE") { HidePlayer(); return; }
             if (command == "SHOW") { hideWhenPlaying = false; background = false; ShowInTaskbar = true; if (!selfTest) Opacity = 1; Show(); WindowState = FormWindowState.Normal; if (!selfTest) Activate(); return; }
             if (command.StartsWith("VOLUME ", StringComparison.Ordinal))
@@ -300,8 +340,8 @@ namespace TonyMods
 
         private void Play(string id)
         {
-            string checkedId;
-            if (!YouTubeUrl.TryGetVideoId("https://youtu.be/" + id, out checkedId)) return;
+            string checkedId, list; long token;
+            if (!YouTubeUrl.TryGetPlayback(id, out checkedId, out list, out token)) return;
             pendingVideo = id;
             if (!ready) return;
             playerReady = false;
@@ -313,12 +353,12 @@ namespace TonyMods
             browser.CoreWebView2.Navigate(PlayerOrigin + "/player?" + id);
         }
 
-        private void PlayAddress()
+        private void PlayAddress(string mode = "append")
         {
-            string id;
-            if (!YouTubeUrl.TryGetVideoId(address.Text, out id))
-            { Console.WriteLine("INVALID_URL"); status.Text = "Enter a valid YouTube video URL."; status.Visible = true; address.Focus(); return; }
-            Console.WriteLine("REQUEST_PLAY " + id);
+            string id, list;
+            if (!YouTubeUrl.TryGetSelection(address.Text, out id, out list))
+            { Console.WriteLine("INVALID_URL"); status.Text = "Enter a valid YouTube video or playlist URL."; status.Visible = true; address.Focus(); return; }
+            SendRequest(new JukeboxRequest { op=mode, video=id, playlist=list });
         }
 
         private void PrepareBackground()
@@ -330,7 +370,7 @@ namespace TonyMods
         }
         private void HidePlayer()
         {
-            if (pendingVideo != null && playerState == -1) PrepareBackground(); else { hideWhenPlaying = false; Hide(); }
+            if ((pendingVideo != null && playerState == -1) || resolveSpec != null) PrepareBackground(); else { hideWhenPlaying = false; Hide(); }
             ShowInTaskbar = false; Console.WriteLine("HIDDEN");
         }
         private void ExitPlayer() { allowClose = true; Close(); }
@@ -382,7 +422,7 @@ namespace TonyMods
 
         private void TestTextEditing()
         {
-            foreach (Size size in new[] { new Size(900, 550), new Size(640, 360) })
+            foreach (Size size in new[] { new Size(1100, 650), new Size(1000, 600) })
             {
                 ClientSize = size; PerformLayout();
                 TableLayoutPanel layout = (TableLayoutPanel)Controls[0];
@@ -392,8 +432,14 @@ namespace TonyMods
                 foreach (Control control in toolbar.Controls)
                     if (!control.Visible || control.Width < 30 || control.Height < 18 || !toolbar.ClientRectangle.Contains(control.Bounds))
                         throw new InvalidOperationException("Toolbar clipped: " + control.Text);
+                FlowLayoutPanel transport = (FlowLayoutPanel)layout.GetControlFromPosition(0, 1);
+                transport.PerformLayout();
+                foreach (Control control in transport.Controls)
+                    if (!control.Visible || !transport.ClientRectangle.Contains(control.Bounds))
+                        throw new InvalidOperationException("Transport clipped: " + control.Text);
+                if (browser.ClientSize.Width < 200 || browser.ClientSize.Height < 200) throw new InvalidOperationException("Player viewport below 200x200");
             }
-            Console.WriteLine("TOOLBAR_LAYOUT=900x550,640x360:PASS");
+            Console.WriteLine("TOOLBAR_LAYOUT=1100x650,1000x600:PASS");
             address.Text = "abcX"; address.Select(4, 0);
             SendMessage(address.Handle, 0x0102, new IntPtr(8), IntPtr.Zero); // WM_CHAR Backspace
             if (address.Text != "abc") throw new InvalidOperationException("Backspace test failed");
@@ -408,11 +454,12 @@ namespace TonyMods
             Console.WriteLine("TEXT_EDIT_SELF_TEST=Backspace,Delete,selection,Clear:PASS");
         }
 
-        private static string PlayerHtml(string id, bool muted)
+        private static string PlayerHtml(string id, string list, long token, bool muted)
         {
+            if (list != "") return PlaylistHtml(list, token);
             return "<!doctype html><html><head><meta name='referrer' content='strict-origin-when-cross-origin'>" +
                 "<style>html,body,#player{margin:0;width:100%;height:100%;background:#141414;overflow:hidden}</style></head><body>" +
-                "<div id='player'></div><script>var player,control=false,suppress=0,pending=0,lastTime=0,lastTick=0;function report(s){chrome.webview.postMessage(s)}" +
+                "<div id='player'></div><script>var player,control=false,suppress=0,pending=0,lastTime=0,lastTick=0;function report(s){chrome.webview.postMessage('" + (token > 0 ? "EVENT " + token + " " : "") + "'+s)}" +
                 "function syncPlayer(t,paused,v,force,edit){control=edit;if(!player||!player.getCurrentTime)return;player.setVolume(v);" +
                 "if(Date.now()<pending)return;var state=player.getPlayerState();if(state===0&&!force)return;" +
                 "if(!paused&&(state===-1||state===5)){suppress=Date.now()+1800;player.playVideo();return;}" +
@@ -425,6 +472,24 @@ namespace TonyMods
                 "onReady:function(e){e.target.setVolume(0);report('PLAYER_READY');" + (muted ? "e.target.mute();" : "") + "e.target.playVideo()}," +
                 "onStateChange:function(e){report('PLAYER_STATE '+e.data);if(control&&Date.now()>suppress&&(e.data===1||e.data===2)){pending=Date.now()+1200;report(e.data===2?'REQUEST_PAUSE':'REQUEST_RESUME')}}," +
                 "onAutoplayBlocked:function(){report('AUTOPLAY_BLOCKED')},onError:function(e){report('PLAYER_ERROR '+e.data)}}})}" +
+                "</script><script src='https://www.youtube.com/iframe_api'></script></body></html>";
+        }
+        private static string PlaylistHtml(string list, long token)
+        {
+            // Resolve on the host, then replace this page with a single-video player.
+            // Letting each peer's iframe advance independently would desynchronize the room.
+            return "<!doctype html><html><head><meta name='referrer' content='strict-origin-when-cross-origin'>" +
+                "<style>html,body,#player{margin:0;width:100%;height:100%;overflow:hidden}</style></head>" +
+                "<body style='margin:0;background:#141414;color:white'><div id='player'></div><script>var player,done=false;" +
+                "function report(s){chrome.webview.postMessage('EVENT " + token + " '+s)}" +
+                "function finish(s){if(done)return;done=true;report(s)}" +
+                "function onYouTubeIframeAPIReady(){player=new YT.Player('player',{width:'100%',height:'100%',playerVars:{origin:'" + PlayerOrigin + "'}," +
+                "events:{onReady:function(e){e.target.mute();e.target.cuePlaylist({list:'" + list + "',listType:'playlist'});}," +
+                "onError:function(e){finish('PLAYER_ERROR '+e.data)}}})}" +
+                "setInterval(function(){if(done||!player||!player.getPlaylist)return;var q=player.getPlaylist();if(!q||!q.length)return;" +
+                "if(q.length>200){finish('PLAYER_ERROR PLAYLIST_LIMIT_200');return;}" +
+                "if(q.some(function(v){return !/^[A-Za-z0-9_-]{11}$/.test(v)})){finish('PLAYER_ERROR INVALID_PLAYLIST');return;}" +
+                "finish('PLAYLIST '+q.join(','))},500);setTimeout(function(){finish('PLAYER_ERROR PLAYLIST_TIMEOUT')},20000);" +
                 "</script><script src='https://www.youtube.com/iframe_api'></script></body></html>";
         }
     }

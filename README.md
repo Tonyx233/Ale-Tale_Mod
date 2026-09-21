@@ -1,3 +1,27 @@
+## 0.8.1 共用點歌佇列（已 build，尚未安裝）
+
+- 點唱機 8m 內所有玩家都能點歌和管理同一份佇列；房主處理操作順序、同步曲目與自動接歌。全員需使用本版，protocol 為 v3。
+- 網址欄支援單曲與歌單：`Add last` 加到最後、`Play next` 插在下一首、`Play now` 中斷目前歌曲並播放新選擇。Enter 預設加入最後。歌單帶 `v` 時匯入該影片起的可讀取歌曲，純歌單網址從第一首起；指定影片不在讀取結果內會明確拒絕。
+- 右側 Up next 顯示待播歌曲、點歌者與順序；支援拖曳排序、Up／Down、Remove、Play selected 與 Clear pending。歌名透過 YouTube oEmbed 背景讀取及記憶體快取，失敗時顯示影片 ID，不妨礙播放或操作。
+- 每筆點歌都有獨立 ID，同一支影片可重複加入；排序以歌曲 ID 和目標歌曲 ID 傳送，不依賴可能過期的列號。房主套用操作時目標已不存在則拒絕並提示，不移動另一首歌。
+- 佇列 revision 與播放 revision 分開：新增、刪除、排序、標題更新都不強制 seek 或重載目前歌曲。
+- 歌單用獨立 WebView 解析，匯入時目前歌曲繼續。房主依收到的順序處理匯入，最多 8 個等待／處理中的匯入；清空待播或停止會取消尚未完成的匯入，過期回傳不再插入歌曲。
+- Stop 停止並保留目前曲目和待播清單，Resume 由開頭重新播放；Pause／Resume 暫停和延續進度；Clear pending 只清待播，不中斷目前歌曲。停止後加入歌曲不會自動重啟，按 Resume 或 Play now 才開始。
+- Previous 從最多 50 筆播放紀錄返回，原本的目前歌曲放回待播第一首；待播已滿時拒絕，避免遺失歌曲。Next 手動跳下一首。Repeat mode 在不循環／單曲／全部之間切換，手動 Next 可跳出單曲循環。
+- 最多 200 筆待播，另有目前歌曲；一次匯入最多 200 首，以 IFrame API 實際回傳結果為準，不保證涵蓋超長歌單全部內容。整批加入超過容量時全部拒絕，不默默截掉部分歌曲。歌單遠端更新與跨房間儲存不在此版範圍。
+- 房主離開聲音範圍仍保留靜音播放器接收結束事件。其他玩家自己的 ended 不會推進全房佇列；track token 防止過期或重複結束事件造成跳歌。
+- YouTube 100／101／150 最多連續跳過 2 首，第 3 次失敗停止且保留佇列。其他播放錯誤停止並提示；匯入錯誤不停止原曲。音量、距離衰減與 BGM 讓位沿用。
+
+驗證結果：
+
+- 808 項佇列 ID、交錯操作、播放時間、容量、播放紀錄、循環及距離檢查；14 項歌單網址／解析檢查通過。
+- 15 項正式 JukeboxSpeaker 測試通過，使用遊戲／網路替身驗證客戶端權限、房主遠距離接歌、排序不 seek、晚加入、取消匯入及 200 首 JSON 往返。這不是實際 Unity Netcode 雙人連線測試。
+- 前一 build 的 1100x650／1000x600 版面、文字輸入與 WebView 初始化通過。真實 YouTube 雙播放器測試匯入範例歌單 200 首，原曲持續播放，排序後由 ended 事件從 `pEdxU1F-FE8` 接到 `cfS4YBuKgEw`，雙方均 playing；當次探測進度差約 0.18 秒，不是同步精度保證。
+- 最後增加佇列 UI 操作自測後，重編的播放器 helper 被 Windows Application Control 阻擋，最後一輪 UI／播放回歸未能啟動；既有 UrlTests.exe 也被阻擋。未調整或繞過安全設定。837 項核心檢查在最後 build 後仍通過。
+- 遊戲安裝的 TONY_BIG_SET.dll 保持 0.8.0；本版未安裝。遊戲內雙人、拖曳手感、全螢幕、距離與 BGM 行為，及目標機器是否允許執行 helper，仍待使用者允許更新後驗證。
+
+可重跑 `powershell -File tests/run.ps1 -QueueOnly`；此選項只選取佇列相關測試，不執行遭阻擋的既有 URL／馬匹測試。加 `-Playlist` 測真實歌單匯入及雙播放器接歌，加 `-Speaker` 測既有音量／暫停／隱藏播放。`-WebView` 包含 UI 和既有 HostTests；若被 Windows 阻擋會失敗，不視為通過。
+
 ## 0.8.0 YouTube 共用外放
 
 - 關閉點唱機介面、播放器 X 或 Back to game 都保留播放，重開沿用進度；退出房間或遊戲時清理播放器。
@@ -25,7 +49,7 @@
 - 騎乘時保留第一人稱手持物，允許原生攻擊、蓄力、瞄準／格擋輸入。跳躍、蹲下與衝刺技能等既有限制保持不變。
 - 測試：`tests/run-horse-pose.ps1` 驗證腿長、不可達目標與退化輸入；仍須在遊戲內驗證男女角色、雙人坐姿、各種武器與下馬復原。幾何測試不代表已完成多人實測或完全消除所有攻擊動作穿模。
 
-# Tony Ale & Tale Mods 0.8.0
+# Tony Ale & Tale Mods 0.8.1
 
 Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機與雙人馬共用一個 DLL。
 
@@ -49,7 +73,7 @@ Ale and Tale Tavern 的整合 BepInEx 模組，血量面板、YouTube 點唱機�
 
 此電腦沿用 TONY_BIG_SET.dll 檔名，plugin GUID 保持不變以相容既有血量設定；不要同時放兩份 DLL。
 DLL 內包含模組程式、播放器 helper 與 WebView2 SDK 元件。
-首次開啟播放器會解出元件到 `BepInEx/cache/TonyAleTaleMods/0.8.0/`。
+首次開啟播放器會解出元件到 `BepInEx/cache/TonyAleTaleMods/0.8.1/`。
 WebView2 Runtime 是額外系統依賴，瀏覽器資料位於 `%LOCALAPPDATA%/TonyAleTaleMods/WebView2Speaker/`。
 請從 Microsoft 官方安裝 Runtime，本模組不會自動安裝系統元件。
 
@@ -59,11 +83,11 @@ WebView2 Runtime 是額外系統依賴，瀏覽器資料位於 `%LOCALAPPDATA%/T
 
 1. 存檔、退出遊戲後更新 DLL，重新啟動。
 2. 操作點唱機，按畫面上方 YouTube。
-3. 在 Windows 原生網址欄貼網址，按 Play 或 Enter；支援 Backspace、Delete、Ctrl+A、Ctrl+V，Clear 清空網址。若未自動播放，按影片內的播放按鈕。
+3. 在 Windows 原生網址欄貼影片或歌單網址，按 Add last 或 Enter 加到共用待播佇列，也可用 Play next 插歌或 Play now 立即播放；支援 Backspace、Delete、Ctrl+A、Ctrl+V，Clear 清空網址。若未自動播放，按影片內的播放按鈕。
 4. 用點唱機原本的音量滑桿調音量；播放器 Pause／Resume／Seek (sec) 控制共用進度，Stop 或遊戲內 Stop YouTube 停止全員播放。控制音樂須在點唱機 8 公尺內。
 5. 按 Back to game 或關閉視窗，再離開點唱機介面即可繼續聽；重新操作點唱機按 YouTube 可開回控制視窗。
 
-房主統一維護曲目／暫停／進度，每位玩家自行載入同一支 YouTube 影片。全員需安裝 0.8.0；原生曲目會停止。3 公尺內保留點唱機音量，往外平滑衰減，30 公尺外靜音；音樂仍持續走時。這是距離衰減，不含方向聲像、遮蔽物或牆壁吸音。
+房主統一維護歌單／曲目／暫停／進度，每位玩家自行載入同一支 YouTube 影片。全員需安裝 0.8.1；原生曲目會停止。3 公尺內保留點唱機音量，往外平滑衰減，30 公尺外靜音；音樂仍持續走時。這是距離衰減，不含方向聲像、遮蔽物或牆壁吸音。
 禁止嵌入、地區／年齡限制、廣告、自動播放限制由 YouTube 決定，無法保證每支影片可播放。
 保留 YouTube 原生播放器與一般廣告。
 建議無邊框／視窗模式；獨佔全螢幕、DPI 與縮放相容性需實機驗證。
