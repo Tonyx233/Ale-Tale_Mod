@@ -19,6 +19,7 @@ foreach($check in $checks){
 }
 $mod=[Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path (Split-Path $PSScriptRoot) 'bin\Tony.TeammateHealthBars.dll'))
 if(!($mod.MainModule.Resources|Where-Object Name -eq 'Tony.Horse.model.json')){throw 'Missing embedded horse model'}
+if(!($mod.MainModule.Resources|Where-Object Name -eq 'Tony.Horse.model2.json')){throw 'Missing embedded Horse 2 model'}
 if($mod.MainModule.Types|Where-Object Name -eq 'TavernCart'){throw 'Old cart code remains in DLL'}
 foreach($type in @('HorseStable','TavernHorse','HorseModel','HorseGait','HorseRiderPose','HorseSeats')){
     if(!($mod.MainModule.Types|Where-Object Name -eq $type)){throw "Missing horse type: $type"}

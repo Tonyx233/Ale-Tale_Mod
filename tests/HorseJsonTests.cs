@@ -40,6 +40,30 @@ class HorseJsonTests
         Vector3 position = (Vector3)recordType.GetField("position").GetValue(horse);
         Check(position.x == 12.5f && position.y == -2.25f && position.z == 80, "manifest preserves position");
         Check((float)recordType.GetField("yaw").GetValue(horse) == 135f, "manifest preserves yaw");
+        Check((int)recordType.GetField("variant").GetValue(horse)==0,"Original horse remains the default variant");
+        recordType.GetField("variant").SetValue(record,1);
+        horse=((Array)snapshotType.GetField("horses").GetValue(RoundTrip(snapshot))).GetValue(0);
+        Check((int)recordType.GetField("variant").GetValue(horse)==1,"Five-seat variant survives save and manifest roundtrip");
+        var valid=mod.GetType("TonyMods.HorseStable").GetMethod("Valid",BindingFlags.Static|BindingFlags.NonPublic);
+        Check((bool)valid.Invoke(null,new[]{snapshot}),"Version 2 accepts Horse 2");
+        recordType.GetField("variant").SetValue(record,99);
+        Check(!(bool)valid.Invoke(null,new[]{snapshot}),"Unknown variant rejected before spawning");
+        recordType.GetField("variant").SetValue(record,1);
+        string oldJson="{\"version\":1,\"horses\":[{\"id\":\""+id+"\",\"scene\":\"Tavern\",\"position\":{\"x\":0,\"y\":0,\"z\":0},\"yaw\":0}]}";
+        object legacy=codec.GetMethod("Deserialize").MakeGenericMethod(snapshotType).Invoke(null,new object[]{oldJson});
+        Check((bool)valid.Invoke(null,new[]{legacy}) && (int)recordType.GetField("variant").GetValue(((Array)snapshotType.GetField("horses").GetValue(legacy)).GetValue(0))==0,"Old sidecar without variant loads original horse");
+        Array mixed=Array.CreateInstance(recordType,32);
+        for(int i=0;i<32;i++)
+        {
+            object entry=Activator.CreateInstance(recordType);
+            recordType.GetField("id").SetValue(entry,Guid.NewGuid().ToString("N"));
+            recordType.GetField("scene").SetValue(entry,new string('T',128));
+            recordType.GetField("position").SetValue(entry,new Vector3(99999,-99999,99999));
+            recordType.GetField("variant").SetValue(entry,i%2);mixed.SetValue(entry,i);
+        }
+        snapshotType.GetField("horses").SetValue(snapshot,mixed);
+        string manifest=(string)codec.GetMethod("Serialize").Invoke(null,new[]{snapshot});
+        Check((bool)valid.Invoke(null,new[]{snapshot}) && System.Text.Encoding.Unicode.GetByteCount(manifest)+8<32768,"32 mixed horses fit fragmented manifest writer");
         snapshotType.GetField("horses").SetValue(snapshot, Array.CreateInstance(recordType, 0));
         Check(((Array)snapshotType.GetField("horses").GetValue(RoundTrip(snapshot))).Length == 0, "empty manifest clears horses");
         Type wireType = mod.GetType("TonyMods.TavernHorse+Wire", true);
@@ -47,9 +71,9 @@ class HorseJsonTests
         wireType.GetField("op").SetValue(wire, 4);
         wireType.GetField("revision").SetValue(wire, 42);
         wireType.GetField("exists").SetValue(wire, true);
-        wireType.GetField("occupants").SetValue(wire, "0,1");
+        wireType.GetField("occupants").SetValue(wire, "0,1,2,3,4");
         object state = RoundTrip(wire);
-        Check((int)wireType.GetField("op").GetValue(state) == 4 && (int)wireType.GetField("revision").GetValue(state) == 42 && (bool)wireType.GetField("exists").GetValue(state) && (string)wireType.GetField("occupants").GetValue(state) == "0,1", "private riding packet preserves state");
+        Check((int)wireType.GetField("op").GetValue(state) == 4 && (int)wireType.GetField("revision").GetValue(state) == 42 && (bool)wireType.GetField("exists").GetValue(state) && (string)wireType.GetField("occupants").GetValue(state) == "0,1,2,3,4", "private riding packet preserves all five riders");
         bool rejected = false;
         try { codec.GetMethod("Deserialize").MakeGenericMethod(recordType).Invoke(null, new object[] { "{\"position\":{\"x\":1}}" }); }
         catch (TargetInvocationException) { rejected = true; }

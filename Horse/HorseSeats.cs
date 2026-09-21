@@ -6,10 +6,14 @@ namespace TonyMods
     // Host-owned seat table. Empty uses a value that cannot be a connected client ID.
     public sealed class HorseSeats
     {
-        public const int Capacity = 2;
+        public int Capacity { get { return occupants.Length; } }
         public const ulong Empty = ulong.MaxValue;
-        private readonly ulong[] occupants = new ulong[Capacity];
-        public HorseSeats() { Clear(); }
+        private readonly ulong[] occupants;
+        public HorseSeats(int capacity = 2)
+        {
+            if (capacity != 2 && capacity != 5) throw new ArgumentOutOfRangeException("capacity");
+            occupants = new ulong[capacity]; Clear();
+        }
         public ulong this[int index] { get { return occupants[index]; } }
         public int Count { get { int count = 0; foreach (ulong id in occupants) if (id != Empty) count++; return count; } }
         public int Find(ulong id) { if (id == Empty) return -1; return Array.IndexOf(occupants, id); }

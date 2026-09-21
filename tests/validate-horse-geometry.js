@@ -17,7 +17,8 @@ for(const p of m.parts){
  assert([...edges.values()].every(e=>e[0]===2&&e[1]===0),p.name+' non-manifold or inconsistent winding');
  assert(volume>0,p.name+' inward winding: '+volume);
 }
-assert(m.parts.filter(p=>p.name==='Leather saddle').length===2);
+const seats=Number(process.argv[3]||2),legs=seats*2;
+assert(m.parts.filter(p=>p.name==='Leather saddle').length===seats);
 // Hoof sole stays on the existing ground plane; skeletal anchors stay compatible.
-for(let i=0;i<4;i++){const foot=m.parts.find(p=>p.name==='Hoof'&&p.bone==='shin'+i);const bottom=Math.min(...foot.vertices.filter((_,k)=>k%3===1))+1.3-.51;assert(Math.abs(bottom-.025)<1e-6);}
-console.log(`PASS: ${faces} non-degenerate triangles, closed oriented meshes, two saddles, four grounded hooves`);
+for(let i=0;i<legs;i++){const foot=m.parts.find(p=>p.name==='Hoof'&&p.bone==='shin'+i);const bottom=Math.min(...foot.vertices.filter((_,k)=>k%3===1))+1.3-.51;assert(Math.abs(bottom-.025)<1e-6);}
+console.log(`PASS: ${faces} non-degenerate triangles, closed oriented meshes, ${seats} saddles, ${legs} grounded hooves`);

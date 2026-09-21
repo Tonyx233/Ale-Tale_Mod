@@ -20,13 +20,13 @@ namespace TonyMods
 {
     public sealed class HorseStable : MonoBehaviour
     {
-        private const string Channel = "Tony.HorseStable.v050";
-        public const ushort ItemId = 47920;
+        private const string Channel = "Tony.HorseStable.v090";
+        public const ushort ItemId = 47920, Item2Id = 47921;
         private static HorseStable instance;
         private ConfigFile config;
         private ManualLogSource log;
         private Harmony patches;
-        private ConfigEntry<int> price;
+        private ConfigEntry<int> price, price2;
         private ConfigEntry<bool> enabledSetting;
         private NetworkManager network;
         private SaveManager subscribedSave;
@@ -34,21 +34,22 @@ namespace TonyMods
         private readonly Dictionary<ulong, float> peers = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> lastUse = new Dictionary<ulong, float>();
         private string loadKey;
-        private bool itemReady;
+        private bool itemReady, item2Ready;
         private bool loaded;
         private float nextManifest, noticeUntil, nextSyncWarning;
         private bool receivedManifest;
         private string notice;
         private Sprite icon;
         private Texture2D iconTexture;
-        [Serializable] public sealed class Record { public string id, scene; public Vector3 position; public float yaw; }
-        [Serializable] public sealed class Snapshot { public int version = 1; public Record[] horses; }
+        [Serializable] public sealed class Record { public string id, scene; public Vector3 position; public float yaw; public int variant; }
+        [Serializable] public sealed class Snapshot { public int version = 2; public Record[] horses; }
 
         public void Initialize(ConfigFile cfg, ManualLogSource logger)
         {
             instance = this; config = cfg; log = logger;
             enabledSetting = cfg.Bind("Horse", "Enabled", true, "Enable purchasable two-seat horses.");
             price = cfg.Bind("Horse", "Price", 1, new ConfigDescription("Merchant price in gold.", new AcceptableValueRange<int>(1, 60000)));
+            price2 = cfg.Bind("Horse2", "Price", 1, new ConfigDescription("Five-seat horse merchant price in gold.", new AcceptableValueRange<int>(1, 60000)));
             patches = new Harmony("Tony.AleTaleMods.Horse");
             TavernHorse.InstallPatches(patches);
             patches.Patch(AccessTools.Method(typeof(ItemManager), "Awake"), prefix: new HarmonyMethod(typeof(HorseStable), "RegisterItem"));
@@ -57,7 +58,7 @@ namespace TonyMods
             patches.Patch(AccessTools.Method(typeof(SaveManager), "NewGame"), prefix: new HarmonyMethod(typeof(HorseStable), "BeforeNewGame"));
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             StartCoroutine(Localize());
-            log.LogInfo("Tony horses 0.5.0: merchant item 47920; inventory use places horse; E mount; Ctrl+F1/F2 switch seats. F6 cart removed.");
+            log.LogInfo("Tony horses 0.9.0: original item 47920 (2 seats/4 legs); Horse 2 item 47921 (5 seats/10 legs); E mount; Ctrl+F1-F5 switch seats.");
         }
         private void Update()
         {
@@ -74,7 +75,7 @@ namespace TonyMods
                 Disconnect(); network = net;
                 network.CustomMessagingManager.RegisterNamedMessageHandler(Channel, Receive);
                 nextManifest = 0; nextSyncWarning = Time.unscaledTime + 10; receivedManifest = false;
-                log.LogInfo("Horse sync 0.5.3 bound; server=" + network.IsServer);
+                log.LogInfo("Horse sync 0.9.0 bound; server=" + network.IsServer);
             }
             if (network.IsServer && !loaded && PlayerNet.Instance != null && PlayerNet.Instance.IsSpawned)
             {
@@ -93,7 +94,7 @@ namespace TonyMods
             if (!network.IsServer && !receivedManifest && Time.unscaledTime >= nextSyncWarning)
             {
                 nextSyncWarning = Time.unscaledTime + 30;
-                log.LogWarning("Horse sync: no valid manifest from host; ensure both players use 0.5.3.");
+                log.LogWarning("Horse sync: no valid manifest from host; ensure all players use matching 0.9.0 or newer DLLs.");
             }
             if (Time.unscaledTime >= nextManifest)
             {
@@ -126,7 +127,7 @@ namespace TonyMods
                 Snapshot snapshot = HorseJson.Deserialize<Snapshot>(json);
                 if (!Valid(snapshot))
                 {
-                    if (Time.unscaledTime >= nextSyncWarning) { nextSyncWarning = Time.unscaledTime + 30; log.LogWarning("Horse sync: invalid manifest from host; ensure matching 0.5.3 DLLs."); }
+                    if (Time.unscaledTime >= nextSyncWarning) { nextSyncWarning = Time.unscaledTime + 30; log.LogWarning("Horse sync: invalid manifest from host; ensure matching horse variant DLLs."); }
                     return;
                 }
                 foreach (Record record in snapshot.horses) if (!horses.ContainsKey(record.id)) Spawn(record);
@@ -148,16 +149,16 @@ namespace TonyMods
         }
         private Snapshot Capture()
         {
-            return new Snapshot { horses = horses.Values.Select(h => new Record { id = h.Id, scene = h.SceneName, position = h.Position, yaw = h.Yaw }).OrderBy(h => h.id, StringComparer.Ordinal).ToArray() };
+            return new Snapshot { horses = horses.Values.Select(h => new Record { id = h.Id, scene = h.SceneName, position = h.Position, yaw = h.Yaw, variant = h.Variant }).OrderBy(h => h.id, StringComparer.Ordinal).ToArray() };
         }
         private static bool Valid(Snapshot s)
         {
-            if (s == null || s.version != 1 || s.horses == null || s.horses.Length > 32) return false;
+            if (s == null || (s.version != 1 && s.version != 2) || s.horses == null || s.horses.Length > 32) return false;
             var ids = new HashSet<string>();
             foreach (Record r in s.horses)
             {
                 Guid id;
-                if (r == null || !Guid.TryParseExact(r.id,"N",out id) || !ids.Add(r.id) || String.IsNullOrEmpty(r.scene) || r.scene.Length > 128 ||
+                if (r == null || !HorseVariant.Valid(r.variant) || (s.version == 1 && r.variant != HorseVariant.Original) || !Guid.TryParseExact(r.id,"N",out id) || !ids.Add(r.id) || String.IsNullOrEmpty(r.scene) || r.scene.Length > 128 ||
                     !Finite(r.position.x) || !Finite(r.position.y) || !Finite(r.position.z) || !Finite(r.yaw)) return false;
             }
             return true;
@@ -168,7 +169,7 @@ namespace TonyMods
             GameObject go = new GameObject("Tony Horse " + r.id); go.transform.SetParent(transform, false);
             try
             {
-                TavernHorse h = go.AddComponent<TavernHorse>(); h.Initialize(config, log, network, r.id, r.scene, r.position, r.yaw);
+                TavernHorse h = go.AddComponent<TavernHorse>(); h.Initialize(config, log, network, r.id, r.scene, r.position, r.yaw, r.variant);
                 horses.Add(r.id, h);
             }
             catch { Destroy(go); throw; }
@@ -196,67 +197,86 @@ namespace TonyMods
         private static void RegisterItem(ItemManager __instance)
         {
             if (instance == null) return;
-            ItemData[] items = __instance.itemDataHub.itemData;
-            ItemData existing = items.FirstOrDefault(i => i != null && i.id == ItemId);
+            instance.itemReady = RegisterVariant(__instance, ItemId, "TonyHorse", instance.price.Value);
+            instance.item2Ready = RegisterVariant(__instance, Item2Id, "TonyHorse2", instance.price2.Value);
+        }
+        private static bool RegisterVariant(ItemManager manager, ushort dataId, string key, int cost)
+        {
+            ItemData[] items = manager.itemDataHub.itemData;
+            ItemData existing = items.FirstOrDefault(i => i != null && i.id == dataId);
             if (existing != null)
             {
-                if (existing.name != "TonyHorseName") { instance.itemReady = false; instance.log.LogError("Horse item ID collision: 47920; horse item disabled."); return; }
-                existing.price = (ushort)instance.price.Value; instance.itemReady = true; return;
+                if (existing.name != key + "Name") { instance.log.LogError("Horse item ID collision: " + dataId + "; this variant disabled."); return false; }
+                existing.price = (ushort)cost; return true;
             }
             ItemData template = items.FirstOrDefault(i => i != null && i.isInvUseable && i.collectiblePrefab != null && i.type == ItemData.Type.Material);
             if (template == null) template = items.FirstOrDefault(i => i != null && i.collectiblePrefab != null && i.type == ItemData.Type.Material);
-            if (template == null) { instance.log.LogError("Horse item registration failed: no collectible template."); return; }
+            if (template == null) { instance.log.LogError("Horse item registration failed: no collectible template."); return false; }
             ItemData item = ScriptableObject.CreateInstance<ItemData>();
-            item.id = ItemId; item.name = "TonyHorseName"; item.itemDescription = "TonyHorseDescription";
-            item.useDescription = "TonyHorseUse"; item.type = ItemData.Type.Material;
-            item.maxStack = 1; item.price = (ushort)instance.price.Value; item.shopItem = true; item.buyByOne = true;
+            item.id = dataId; item.name = key + "Name"; item.itemDescription = key + "Description";
+            item.useDescription = key + "Use"; item.type = ItemData.Type.Material;
+            item.maxStack = 1; item.price = (ushort)cost; item.shopItem = true; item.buyByOne = true;
             item.isInvUseable = true; item.doNotRemoveOnUse = true; item.hotbarItem = false;
             item.icon = instance.MakeIcon(); item.collectiblePrefab = template.collectiblePrefab;
             item.fpPrefab = template.fpPrefab; item.tpPrefab = template.tpPrefab; item.netPrefab = template.netPrefab;
-            __instance.itemDataHub.itemData = items.Concat(new[] { item }).ToArray(); instance.itemReady = true;
+            manager.itemDataHub.itemData = items.Concat(new[] { item }).ToArray(); return true;
         }
         // Run at the native server-side inventory-use entry, not the generated RPC wrapper.
         private static bool UseItem(ContainerNet __0, uint __1, ItemData __2, ulong __3)
         {
-            if (__2 == null || __2.id != ItemId || instance == null || !instance.itemReady) return true;
-            if (instance != null) instance.PlaceFromInventory(__0, __1, __3);
+            if (__2 == null || instance == null) return true;
+            if (__2.id == ItemId && instance.itemReady) instance.PlaceFromInventory(__0, __1, __3, HorseVariant.Original);
+            else if (__2.id == Item2Id && instance.item2Ready) instance.PlaceFromInventory(__0, __1, __3, HorseVariant.Extended);
+            else return true;
             return false;
         }
-        private void PlaceFromInventory(ContainerNet container, uint itemId, ulong sender)
+        private void PlaceFromInventory(ContainerNet container, uint itemId, ulong sender, int variant)
         {
             if (network == null || !network.IsServer || !enabledSetting.Value) return;
             PlayerNet player;
             ContainerNet owned; Item item;
             if (!PlayerManager.Instance.players.TryGetValue(sender,out player) || player == null || player.hp.Value <= 0 ||
-                !ContainerManager.Instance.GetPlayerContainer(sender,out owned) || owned != container || !container.GetItemById(itemId,out item,true) || item.dataId != ItemId || item.amount < 1) return;
+                !ContainerManager.Instance.GetPlayerContainer(sender,out owned) || owned != container || !container.GetItemById(itemId,out item,true) || item.dataId != (variant == HorseVariant.Extended ? Item2Id : ItemId) || item.amount < 1) return;
             float last;
             if (lastUse.TryGetValue(sender,out last) && Time.unscaledTime-last < .5f) return;
             lastUse[sender] = Time.unscaledTime;
             if (horses.Count >= 32) { Note(sender,"Stable limit reached (32 horses). Item was not consumed."); return; }
             foreach (var h in horses.Values) if (h.HasRider(sender)) { Note(sender,"Dismount before placing another horse."); return; }
             Vector3 ground;
-            if (!FindGround(player, out ground)) { Note(sender,"Use the horse item in a clear outdoor area. Item was not consumed."); return; }
-            Record record = new Record { id = Guid.NewGuid().ToString("N"), scene = SceneManager.GetActiveScene().name, position = ground, yaw = player.transform.eulerAngles.y };
+            if (!FindGround(player, variant, out ground)) { Note(sender,"Use the horse item in a clear outdoor area. Item was not consumed."); return; }
+            Record record = new Record { id = Guid.NewGuid().ToString("N"), scene = SceneManager.GetActiveScene().name, position = ground, yaw = player.transform.eulerAngles.y, variant = variant };
             try { Spawn(record); }
             catch (Exception ex) { log.LogError("Horse creation failed; item retained: " + ex); return; }
             if (!container.RemoveItemAmount(itemId,1)) { Destroy(horses[record.id].gameObject); horses.Remove(record.id); return; }
-            Note(sender,"Horse placed. E mounts; Ctrl+F1/F2 changes seats."); Broadcast();
+            Note(sender,variant == HorseVariant.Extended ? "Horse 2 placed (5 seats). E mounts; Ctrl+F1-F5 changes seats." : "Horse placed. E mounts; Ctrl+F1/F2 changes seats."); Broadcast();
         }
-        private static bool FindGround(PlayerNet player, out Vector3 ground)
+        private static bool FindGround(PlayerNet player, int variant, out Vector3 ground)
         {
             ground = Vector3.zero;
-            Vector3 near = player.transform.position + Vector3.ProjectOnPlane(player.transform.forward,Vector3.up).normalized * 3.5f;
+            float extension = HorseVariant.RearExtension(variant);
+            Vector3 near = player.transform.position + Vector3.ProjectOnPlane(player.transform.forward,Vector3.up).normalized * (3.5f + extension);
             RaycastHit hit;
             if (!Physics.Raycast(near+Vector3.up*2,Vector3.down,out hit,5,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore) || Vector3.Angle(hit.normal,Vector3.up)>25) return false;
             ground=hit.point+Vector3.up*.05f;
             if (Physics.Linecast(player.transform.position+Vector3.up,ground+Vector3.up,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore)) return false;
             if (Physics.Raycast(ground+Vector3.up*.1f,Vector3.up,5,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore)) return false;
             Quaternion yaw=Quaternion.Euler(0,player.transform.eulerAngles.y,0);
-            if (Physics.CheckBox(ground+Vector3.up*1.45f,new Vector3(.65f,1.4f,1.6f),yaw,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore)) return false;
+            if (Physics.CheckBox(ground+Vector3.up*1.45f+yaw*Vector3.back*(extension*.5f),new Vector3(.65f,1.4f,1.6f+extension*.5f),yaw,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore)) return false;
             foreach (Vector3 p in new[] {new Vector3(-.55f,0,-1.3f),new Vector3(.55f,0,-1.3f),new Vector3(-.55f,0,1.3f),new Vector3(.55f,0,1.3f)})
             {
                 RaycastHit support;
                 if (!Physics.Raycast(ground+yaw*p+Vector3.up,Vector3.down,out support,1.4f,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore) || Math.Abs(support.point.y-hit.point.y)>.3f) return false;
+            }
+            if (extension > 0)
+            {
+                // Check support and overhead clearance along every extra seat, including the tail.
+                for (int i = 1; i <= 3; i++) foreach (float x in new[] { -.55f, .55f })
+                {
+                    Vector3 point = ground + yaw * new Vector3(x, 0, -1.3f - i * HorseVariant.SeatSpacing);
+                    RaycastHit support;
+                    if (!Physics.Raycast(point+Vector3.up,Vector3.down,out support,1.4f,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore) ||
+                        Math.Abs(support.point.y-hit.point.y)>.3f || Physics.Raycast(point+Vector3.up*.1f,Vector3.up,5,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore)) return false;
+                }
             }
             return true;
         }
@@ -288,6 +308,9 @@ namespace TonyMods
             SetText(table,"TonyHorseName",zh?"牛馬":"Two-seat Horse");
             SetText(table,"TonyHorseDescription",zh?"可供一位駕駛與一位乘客騎乘。於戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+F1/F2 換位。":"Use from your inventory outdoors to place a horse for a driver and passenger. E mounts, Shift boosts, Ctrl+F1/F2 switches seats.");
             SetText(table,"TonyHorseUse",zh?"戶外使用：放置雙人馬":"Use outdoors: place horse");
+            SetText(table,"TonyHorse2Name",zh?"牛馬2":"Horse 2");
+            SetText(table,"TonyHorse2Description",zh?"五座十腿牛馬，可供一位駕駛與四位乘客騎乘。於空曠戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+F1～F5 換位。":"Five saddles and ten legs: one driver and four passengers. Use outdoors in a clear area. E mounts, Shift boosts, Ctrl+F1-F5 switches seats.");
+            SetText(table,"TonyHorse2Use",zh?"戶外使用：放置五座十腿牛馬2":"Use outdoors: place five-seat Horse 2");
         }
         private static void SetText(UnityEngine.Localization.Tables.StringTable table, string key, string value)
         { var entry=table.GetEntry(key); if(entry==null)table.AddEntry(key,value); else entry.Value=value; }

@@ -16,6 +16,8 @@ namespace TonyMods
         private string Channel;
         public string Id { get; private set; }
         public string SceneName { get; private set; }
+        public int Variant { get; private set; }
+        private float Extension { get { return HorseVariant.RearExtension(Variant); } }
         private HorseModel model;
         private static readonly List<TavernHorse> all = new List<TavernHorse>();
         public static IEnumerable<TavernHorse> All { get { return all; } }
@@ -39,12 +41,12 @@ namespace TonyMods
         }
         private static TavernHorse Nearest
         {
-            get { TavernHorse best = null; float distance = MountRange; foreach (var h in all) { if (h.cart == null || PlayerNet.Instance == null || h.SceneName != SceneManager.GetActiveScene().name) continue; float d = Vector3.Distance(h.Position, PlayerNet.Instance.transform.position); if (d < distance) { distance = d; best = h; } } return best; }
+            get { TavernHorse best = null; float distance = MountRange; foreach (var h in all) { if (h.cart == null || PlayerNet.Instance == null || h.SceneName != SceneManager.GetActiveScene().name) continue; float d = h.MountDistance(PlayerNet.Instance.transform.position); if (d < distance) { distance = d; best = h; } } return best; }
         }
-        private readonly HorseSeats seats = new HorseSeats();
+        private HorseSeats seats = new HorseSeats();
         private readonly Dictionary<ulong, float> peers = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> lastRequest = new Dictionary<ulong, float>();
-        private readonly Vector3[] offsets = { new Vector3(0,0,.20f), new Vector3(0,0,-.48f) };
+        private Vector3[] offsets;
         private ConfigEntry<bool> enabledSetting;
         private ConfigEntry<KeyCode> mountKey;
         private ConfigEntry<float> cruise, boost;
@@ -74,9 +76,12 @@ namespace TonyMods
             public float yaw;
         }
 
-        public void Initialize(ConfigFile config, ManualLogSource logger, NetworkManager net, string id, string scene, Vector3 position, float yaw)
+        public void Initialize(ConfigFile config, ManualLogSource logger, NetworkManager net, string id, string scene, Vector3 position, float yaw, int variant = HorseVariant.Original)
         {
-            log = logger; Id = id; SceneName = scene; Channel = "Tony.Horse.v050." + id;
+            Variant = variant; seats = new HorseSeats(HorseVariant.Seats(variant));
+            offsets = new Vector3[seats.Capacity];
+            for (int i = 0; i < offsets.Length; i++) offsets[i] = new Vector3(0, 0, HorseVariant.SeatZ(i));
+            log = logger; Id = id; SceneName = scene; Channel = "Tony.Horse.v090." + id;
             enabledSetting = config.Bind("Horse", "Enabled", true, "Shared two-seat horses. All riders and host need this version.");
             mountKey = config.Bind("Horse", "MountKey", KeyCode.E, "Mount or dismount the closest horse.");
             cruise = config.Bind("Cart", "SpeedMultiplier", 1.8f);
@@ -122,7 +127,7 @@ namespace TonyMods
             if (Time.unscaledTime >= nextHello) { nextHello = Time.unscaledTime + 1; Request(0); }
             if (network.IsServer)
             {
-                for (int i = 0; i < HorseSeats.Capacity; i++)
+                for (int i = 0; i < seats.Capacity; i++)
                 {
                     ulong id = seats[i]; float seen;
                     if (id != HorseSeats.Empty && (!Alive(Player(id)) || (id != network.LocalClientId && (!peers.TryGetValue(id, out seen) || Time.unscaledTime - seen > 5)))) seats.Remove(id);
@@ -136,8 +141,8 @@ namespace TonyMods
             if (!CanInput()) return;
             if (localSeat >= 0 && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)))
             {
-                if (Input.GetKeyDown(KeyCode.F1)) Request(7);
-                if (Input.GetKeyDown(KeyCode.F2)) Request(8);
+                for (int seat = 0; seat < seats.Capacity; seat++)
+                    if (Input.GetKeyDown((KeyCode)((int)KeyCode.F1 + seat))) Request(7 + seat);
             }
             if (Input.GetKeyDown(mountKey.Value) && (localSeat >= 0 || (Active == null && Nearest == this)))
             { consumeFrame = Time.frameCount; Request(localSeat >= 0 ? 2 : 1); }
@@ -187,7 +192,7 @@ namespace TonyMods
         {
             bool connected = sender == network.LocalClientId;
             foreach (ulong id in network.ConnectedClientsIds) if (id == sender) connected = true;
-            if (!connected || !(packet.op == 0 || packet.op == 1 || packet.op == 2 || packet.op == 7 || packet.op == 8)) return;
+            if (!connected || !(packet.op == 0 || packet.op == 1 || packet.op == 2 || (packet.op >= 7 && packet.op < 7 + seats.Capacity))) return;
             if (packet.op == 0) { peers[sender] = Time.unscaledTime; return; }
             if (!peers.ContainsKey(sender)) return;
             float previous;
@@ -195,11 +200,11 @@ namespace TonyMods
             lastRequest[sender] = Time.unscaledTime;
             PlayerNet player = Player(sender);
             if (!Alive(player)) return;
-            if ((packet.op == 7 || packet.op == 8) && HasRider(sender) && IsAirborne())
+            if (packet.op >= 7 && HasRider(sender) && IsAirborne())
             { Note(sender, "Wait until the horse lands before changing seats."); return; }
-            if (packet.op == 7 || packet.op == 8)
+            if (packet.op >= 7)
             {
-                int target = packet.op == 7 ? 0 : 1;
+                int target = packet.op - 7;
                 if (!seats.TrySwitch(sender, target)) { Note(sender, "Seat occupied, or you are not riding this horse."); return; }
                 if (target == 0) driverGraceUntil = Time.unscaledTime + .75f;
                 if (sender == network.LocalClientId) ApplySeat();
@@ -207,14 +212,14 @@ namespace TonyMods
             else if (packet.op == 1)
             {
                 if (cart == null) { Note(sender, "Horse is not ready. Try again."); return; }
-                if (Vector3.Distance(player.transform.position, vehiclePosition) > MountRange)
+                if (MountDistance(player.transform.position) > MountRange)
                 { Note(sender, "Move closer to the horse (within 3m)."); return; }
                 foreach (var other in all) if (other != this && other.HasRider(sender)) return;
                 if (MountPathBlocked(player))
                 { Note(sender, "Path to horse is blocked. Approach from another side."); return; }
                 bool newRider = seats.Find(sender) < 0;
                 int assigned = seats.Board(sender);
-                if (assigned < 0) Note(sender, "Horse is full (2/2).");
+                if (assigned < 0) Note(sender, "Horse is full (" + seats.Capacity + "/" + seats.Capacity + ").");
                 else if (assigned == 0 && newRider) driverGraceUntil = Time.unscaledTime + 0.75f;
                 if (parkedCollider != null) parkedCollider.enabled = seats.Count == 0;
                 if (sender == network.LocalClientId) ApplySeat();
@@ -230,10 +235,46 @@ namespace TonyMods
             }
             Broadcast();
         }
+        private Vector3 MountPoint(Vector3 player)
+        {
+            if (Extension == 0) return vehiclePosition;
+            Vector3 local = Quaternion.Inverse(vehicleRotation) * (player - vehiclePosition);
+            return vehiclePosition + vehicleRotation * new Vector3(0, 0, Mathf.Clamp(local.z, offsets[offsets.Length-1].z, offsets[0].z));
+        }
+        private float MountDistance(Vector3 player) { return Vector3.Distance(player, MountPoint(player)); }
+        private bool HorseObstacle(Transform obstacle)
+        {
+            if (obstacle == null || obstacle.IsChildOf(cart.transform)) return false;
+            for (int i = 0; i < seats.Capacity; i++)
+            {
+                if (seats[i] == HorseSeats.Empty) continue;
+                PlayerNet occupant = Player(seats[i]);
+                if (occupant != null && obstacle.IsChildOf(occupant.transform)) return false;
+            }
+            return true;
+        }
+        private bool ExtendedPathClear(Vector3 position, Quaternion rotation)
+        {
+            // Test the whole long body while translating AND turning, not only the driver capsule.
+            float travel = Vector3.Distance(position, vehiclePosition) + Quaternion.Angle(vehicleRotation, rotation) * Mathf.Deg2Rad * (1.35f + Extension);
+            if (travel < .0001f) return true;
+            int steps = Mathf.CeilToInt(travel / .15f);
+            if (steps > 128) return false;
+            for (int i = 1; i <= steps; i++)
+            {
+                float t = (float)i / steps;
+                Quaternion facing = Quaternion.Slerp(vehicleRotation, rotation, t);
+                Vector3 center = Vector3.Lerp(vehiclePosition, position, t) + facing * new Vector3(0, 1.4f, -Extension*.5f);
+                foreach (Collider obstacle in Physics.OverlapBox(center, new Vector3(.46f, .85f, 1.35f+Extension*.5f), facing,
+                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                    if (HorseObstacle(obstacle.transform)) return false;
+            }
+            return true;
+        }
         private bool MountPathBlocked(PlayerNet player)
         {
             Vector3 start = player.transform.position + Vector3.up;
-            Vector3 delta = vehiclePosition + Vector3.up - start;
+            Vector3 delta = MountPoint(player.transform.position) + Vector3.up - start;
             if (delta.sqrMagnitude < 0.0001f) return false;
             // Inspect every hit: ignoring a rider must not hide a wall behind them.
             foreach (RaycastHit hit in Physics.RaycastAll(start, delta.normalized, delta.magnitude,
@@ -242,7 +283,7 @@ namespace TonyMods
                 Transform obstacle = hit.transform;
                 if (obstacle == null || obstacle.IsChildOf(cart.transform) || obstacle.IsChildOf(player.transform)) continue;
                 bool seatedRider = false;
-                for (int i = 0; i < HorseSeats.Capacity; i++)
+                for (int i = 0; i < seats.Capacity; i++)
                 {
                     if (seats[i] == HorseSeats.Empty) continue;
                     PlayerNet occupant = Player(seats[i]);
@@ -269,12 +310,21 @@ namespace TonyMods
             Quaternion rotation = Quaternion.Euler(0, driver.transform.eulerAngles.y, 0);
             Vector3 position = driver.transform.position - rotation * offsets[0];
             if (Vector3.Distance(position, vehiclePosition) > 15) { if (network.IsServer) seats.Clear(); return; }
+            if (Extension > 0 && localSeat == 0 && !ExtendedPathClear(position, rotation))
+            {
+                bool wasEnabled = controller != null && controller.enabled;
+                if (controller != null) controller.enabled = false;
+                driver.transform.SetPositionAndRotation(vehiclePosition + vehicleRotation * offsets[0], vehicleRotation);
+                if (controller != null) controller.enabled = wasEnabled;
+                if (movement != null) movement.characterVelocity = Vector3.zero;
+                return;
+            }
             vehiclePosition = position; vehicleRotation = rotation;
         }
         private bool NearCart()
         {
             if (cart == null || PlayerNet.Instance == null) return false;
-            return Vector3.Distance(PlayerNet.Instance.transform.position, cart.transform.position) < MountRange;
+            return MountDistance(PlayerNet.Instance.transform.position) < MountRange;
         }
         private void ApplySeat()
         {
@@ -296,7 +346,7 @@ namespace TonyMods
             movement.characterVelocity = Vector3.zero; movement.isAutoRunning = false;
             passengerPitch = passengerYaw = 0;
             lastPosition = rider.transform.position;
-            Tell(wanted == 0 ? "Driver: WASD | Shift boost | Jump key | E exit" : "Passenger | E exit | Ctrl+F1: driver");
+            Tell(wanted == 0 ? "Driver: WASD | Shift boost | Jump key | E exit" : "Passenger | E exit | Ctrl+F1: driver | Ctrl+F2-F"+seats.Capacity+": seat");
         }
         private void RestoreRider()
         {
@@ -314,13 +364,33 @@ namespace TonyMods
             exit = Vector3.zero;
             CharacterController cc = player.GetComponent<CharacterController>();
             if (cc == null) return false;
+            int seat = seats.Find(player.OwnerClientId);
+            Vector3 origin = Extension > 0 && seat >= 0 ? vehiclePosition + vehicleRotation * offsets[seat] : vehiclePosition;
+            if (Extension > 0)
+            {
+                foreach (float side in new[] { 1f, -1f })
+                {
+                    Vector3 near = origin + vehicleRotation * Vector3.right * (side * 1.4f);
+                    if (GroundSpot(near, .5f, cc.height, false, out exit) && ExitPathClear(origin, exit)) return true;
+                }
+            }
             for (int i = 0; i < 12; i++)
             {
-                Vector3 near = vehiclePosition + Quaternion.Euler(0, i * 30, 0) * Vector3.forward * 3.5f;
+                Vector3 near = origin + Quaternion.Euler(0, i * 30, 0) * Vector3.forward * 3.5f;
                 if (!GroundSpot(near, 0.5f, cc.height, false, out exit)) continue;
-                if (!Physics.Linecast(vehiclePosition + Vector3.up * 1.4f, exit + Vector3.up * 1.4f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) return true;
+                if (Extension > 0 ? ExitPathClear(origin, exit) : !Physics.Linecast(origin + Vector3.up * 1.4f, exit + Vector3.up * 1.4f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) return true;
             }
             return false;
+        }
+        private bool ExitPathClear(Vector3 origin, Vector3 exit)
+        {
+            Vector3 local = Quaternion.Inverse(vehicleRotation) * (exit - vehiclePosition);
+            if (Mathf.Abs(local.x) < 1f && local.z > -1.35f-Extension-.5f && local.z < 1.85f) return false;
+            Vector3 delta = exit - origin;
+            foreach (RaycastHit hit in Physics.RaycastAll(origin+Vector3.up*1.4f, delta.normalized, delta.magnitude,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                if (HorseObstacle(hit.transform)) return false;
+            return true;
         }
         private void ExitAt(Vector3 position)
         {
@@ -438,7 +508,7 @@ namespace TonyMods
         private void OnGUI()
         {
             if (network==null || !enabledSetting.Value || (Active != this && Nearest != this)) return;
-            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift | Jump key | E exit | Ctrl+F2: passenger" : localSeat>0 ? "Passenger | E exit | Ctrl+F1: driver" : CanInput()&&NearCart() ? "E: Mount horse ("+seats.Count+"/2)" : "";
+            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift | Jump key | E exit | Ctrl+F1-F"+seats.Capacity+": seat" : localSeat>0 ? "Passenger | E exit | Ctrl+F1-F"+seats.Capacity+": seat" : CanInput()&&NearCart() ? "E: Mount horse ("+seats.Count+"/"+seats.Capacity+")" : "";
             if (!String.IsNullOrEmpty(text)) GUI.Box(new Rect(Screen.width/2-270,Screen.height-175,540,35),text);
         }
         private void OnDestroy() { Unbind(); all.Remove(this); }
@@ -472,10 +542,10 @@ namespace TonyMods
 
         private void BuildCart()
         {
-            cart = new GameObject("Tony Two Seat Horse"); cart.transform.SetParent(transform, false);
-            model = HorseModel.Create(cart.transform);
+            cart = new GameObject(Variant == HorseVariant.Extended ? "Tony Five Seat Horse" : "Tony Two Seat Horse"); cart.transform.SetParent(transform, false);
+            model = HorseModel.Create(cart.transform, Variant);
             parkedCollider = cart.AddComponent<BoxCollider>();
-            parkedCollider.center = new Vector3(0,1.2f,0); parkedCollider.size = new Vector3(.9f,2.4f,2.7f);
+            parkedCollider.center = new Vector3(0,1.2f,-Extension*.5f); parkedCollider.size = new Vector3(.9f,2.4f,2.7f+Extension);
         }
         private void RemoveCart()
         {

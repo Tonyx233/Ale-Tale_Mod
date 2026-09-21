@@ -16,13 +16,15 @@ namespace TonyMods
         private Vector3 previous;
         private float speed, phase, airborneBlend;
         private bool started;
+        private int variant, legCount = 4;
         public float SaddleBob { get { return bones.ContainsKey("body") ? bones["body"].localPosition.y : 0; } }
 
-        public static HorseModel Create(Transform parent)
+        public static HorseModel Create(Transform parent, int variant = HorseVariant.Original)
         {
-            GameObject go = new GameObject("Double Saddle Horse");
+            GameObject go = new GameObject(variant == HorseVariant.Extended ? "Five Saddle Horse" : "Double Saddle Horse");
             go.transform.SetParent(parent, false);
             HorseModel model = go.AddComponent<HorseModel>();
+            model.variant = variant; model.legCount = HorseVariant.Seats(variant) * 2;
             model.Build();
             return model;
         }
@@ -30,7 +32,7 @@ namespace TonyMods
         private void Build()
         {
             Definition data;
-            using (var stream = typeof(HorseModel).Assembly.GetManifestResourceStream("Tony.Horse.model.json"))
+            using (var stream = typeof(HorseModel).Assembly.GetManifestResourceStream(variant == HorseVariant.Extended ? "Tony.Horse.model2.json" : "Tony.Horse.model.json"))
             using (var reader = new System.IO.StreamReader(stream)) data = Newtonsoft.Json.JsonConvert.DeserializeObject<Definition>(reader.ReadToEnd());
             Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
             if (shader == null) throw new InvalidOperationException("Horse shader unavailable");
@@ -83,9 +85,9 @@ namespace TonyMods
             phase += dt * Mathf.Lerp(.5f, 2.8f, Mathf.Clamp01(speed / 8)) * Mathf.PI * 2;
             float weight = Mathf.Clamp01(speed / .8f), run = Mathf.Clamp01((speed - 4) / 3);
             airborneBlend = Mathf.MoveTowards(airborneBlend, airborne ? 1f : 0f, dt * 8f);
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < legCount; i++)
             {
-                float offset = HorseGait.Offset(i, run);
+                float offset = HorseGait.Offset(i, run, legCount);
                 double angle = phase + offset;
                 bones["leg"+i].localRotation = Quaternion.Euler(Mathf.Lerp(HorseGait.Upper(angle, weight, run), -25f, airborneBlend), 0, 0);
                 bones["shin"+i].localRotation = Quaternion.Euler(Mathf.Lerp(HorseGait.Lower(angle, weight, run), 65f, airborneBlend), 0, 0);

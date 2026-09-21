@@ -3,7 +3,7 @@ const html=fs.readFileSync(process.argv[2],'utf8'),script=html.match(/<script>([
 let draws=0;const gl=new Proxy({}, {get:(_,key)=>{
  if(key==='getShaderParameter'||key==='getProgramParameter')return ()=>true;
  if(key==='bufferData')return (_,data)=>assert([...data].every(Number.isFinite),'finite animated vertex data');
- if(key==='drawArrays')return (_,start,count)=>{assert(start===0&&count===7752*3);draws++;};
+ if(key==='drawArrays')return (_,start,count)=>{assert(start===0&&count===Number(process.argv[3]||7752)*3);draws++;};
  if(key===key.toUpperCase())return 1;
  return ()=>({});
 }});

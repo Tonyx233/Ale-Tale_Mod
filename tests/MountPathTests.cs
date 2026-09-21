@@ -38,6 +38,7 @@ partial class TavernHorse
     GameObject cart=new GameObject();
     Vector3 vehiclePosition=new Vector3(0,0,0);
     HorseSeats seats=new HorseSeats();
+    Vector3 MountPoint(Vector3 player){return vehiclePosition;}
     Logger log=new Logger();
     Dictionary<ulong,PlayerNet> players=new Dictionary<ulong,PlayerNet>();
     PlayerNet Player(ulong id){PlayerNet p;return players.TryGetValue(id,out p)?p:null;}
@@ -46,9 +47,9 @@ partial class TavernHorse
     static RaycastHit Hit(Transform t){return new RaycastHit{transform=t};}
     static void Main()
     {
-        foreach(ulong driverId in new ulong[]{0,1})
+        foreach(int capacity in new[]{2,5}) foreach(ulong driverId in new ulong[]{0,1})
         {
-            var h=new TavernHorse();
+            var h=new TavernHorse(); h.seats=new HorseSeats(capacity);
             var driver=new PlayerNet{OwnerClientId=driverId};
             var passenger=new PlayerNet{OwnerClientId=1-driverId};
             passenger.transform.position=new Vector3(2,0,0);

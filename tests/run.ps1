@@ -25,7 +25,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Speaker network test build failed' }
 & (Join-Path $root 'bin\SpeakerNetworkTests.exe')
 if ($LASTEXITCODE -ne 0) { throw 'Speaker network tests failed' }
 if (!$QueueOnly) {
-& $compiler /nologo /target:exe ('/out:'+(Join-Path $root 'bin\HorseTests.exe')) (Join-Path $PSScriptRoot 'HorseTests.cs') (Join-Path $root 'Horse\HorseSeats.cs') (Join-Path $root 'Horse\HorseGait.cs')
+& $compiler /nologo /target:exe ('/out:'+(Join-Path $root 'bin\HorseTests.exe')) (Join-Path $PSScriptRoot 'HorseTests.cs') (Join-Path $root 'Horse\HorseSeats.cs') (Join-Path $root 'Horse\HorseGait.cs') (Join-Path $root 'Horse\HorseVariant.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Seat test build failed' }
 & (Join-Path $root 'bin\HorseTests.exe')
 if ($LASTEXITCODE -ne 0) { throw 'Seat tests failed' }
