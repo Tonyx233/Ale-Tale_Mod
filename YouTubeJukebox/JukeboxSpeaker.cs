@@ -129,7 +129,7 @@ namespace TonyMods
         {
             if(resolving!=null || imports.Count==0)return;
             resolving=imports.Dequeue();
-            if(resolving.request.playlist=="") {EndImport(new[]{resolving.request.video},"");return;}
+            if(resolving.request.video!="") {EndImport(new[]{resolving.request.video},"");return;}
             resolveDeadline=Time.unscaledTime+40;
             emit("RESOLVE "+resolving.id+"~"+resolving.request.playlist);
         }

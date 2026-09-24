@@ -17,7 +17,8 @@ namespace TonyMods
             if (host != "youtu.be" && host != "youtube.com" && host != "www.youtube.com" && host != "m.youtube.com" && host != "music.youtube.com") return false;
             string id;
             bool hasVideo = TryGetVideoId(input, out id);
-            if (hasVideo) video = id;
+            // A song shared from a playlist or Mix still selects only that song.
+            if (hasVideo) { video = id; return true; }
             foreach (string pair in uri.Query.TrimStart('?').Split('&'))
             {
                 int equals = pair.IndexOf('=');

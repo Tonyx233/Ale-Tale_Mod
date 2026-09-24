@@ -10,8 +10,8 @@ using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-[assembly: System.Reflection.AssemblyVersion("0.11.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.11.1.0")]
+[assembly: System.Reflection.AssemblyVersion("0.11.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.11.2.0")]
 
 namespace TonyMods
 {

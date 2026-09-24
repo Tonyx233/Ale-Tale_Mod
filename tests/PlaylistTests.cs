@@ -8,7 +8,16 @@ class PlaylistTests
     {
         const string video="pEdxU1F-FE8",list="PLdrk_BM8q45oxliginXQPrQuoTk2ppFjV";
         string v,p;long token;
-        Check(YouTubeUrl.TryGetSelection("https://www.youtube.com/watch?v="+video+"&list="+list,out v,out p) && v==video && p==list,"video + playlist");
+        Check(YouTubeUrl.TryGetSelection("https://www.youtube.com/watch?v="+video+"&list="+list,out v,out p) && v==video && p=="","video takes precedence over playlist");
+        foreach(string url in new[]{
+            "https://www.youtube.com/watch?v="+video+"&list=RD"+video+"&index=27",
+            "https://youtu.be/"+video+"?list="+list+"&t=30",
+            "https://music.youtube.com/watch?list="+list+"&v="+video,
+            "https://www.youtube.com/shorts/"+video+"?list="+list,
+            "https://www.youtube.com/live/"+video+"?list="+list,
+            "https://www.youtube.com/embed/"+video+"?list="+list,
+            "https://www.youtube.com/watch?v="+video+"&list=invalid&list=duplicate"})
+            Check(YouTubeUrl.TryGetSelection(url,out v,out p) && v==video && p=="","shared song ignores playlist context: "+url);
         Check(YouTubeUrl.TryGetSelection("https://www.youtube.com/playlist?list="+list,out v,out p) && v=="" && p==list,"playlist only");
         Check(YouTubeUrl.TryGetSelection("https://youtu.be/"+video,out v,out p) && v==video && p=="","single video");
         foreach(string bad in new[]{"https://youtube.com.evil/watch?v="+video+"&list="+list,"https://youtube.com/watch?v=bad&list="+list,

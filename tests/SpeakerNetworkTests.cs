@@ -54,6 +54,16 @@ class SpeakerNetworkTests
         state=State();Request(1,new JukeboxRequest{op="stop",box=42,track=state.track,playRevision=state.playRevision});
         Check(State().stopped && State().current!=null,"stop preserves queue state");
         state=State();Request(1,new JukeboxRequest{op="state",box=42});Check(State().video==state.video,"client cannot replace server state");
+        foreach(string mode in new[]{"append","insert","now"})
+        {
+            int count=State().pending.Length;
+            commands.Clear();
+            Request(1,new JukeboxRequest{op=mode,box=42,video="cfS4YBuKgEw",playlist="PLdrk_BM8q45oxliginXQPrQuoTk2ppFjV"});
+            var single=State();
+            Check(!commands.Any(x=>x.StartsWith("RESOLVE ")),mode+" with video and list does not fetch playlist");
+            Check(single.pending.Length==count+(mode=="now"?0:1),mode+" adds only one song");
+            Check((mode=="now"?single.current:mode=="insert"?single.pending[0]:single.pending.Last()).video=="cfS4YBuKgEw",mode+" keeps requested song");
+        }
         var big=new JukeboxState();JukeboxState built;string error;
         var songs=new string[200];for(int i=0;i<songs.Length;i++)songs[i]="pEdxU1F-FE8";
         Check(big.TryInsert("append",songs,1,42,0,out built,out error),"large queue");
