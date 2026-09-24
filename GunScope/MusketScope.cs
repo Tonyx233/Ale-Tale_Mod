@@ -15,7 +15,6 @@ namespace TonyMods
         private static readonly FieldInfo StateField = AccessTools.Field(typeof(GunTool), "_state");
         private static readonly FieldInfo ReloadField = AccessTools.Field(typeof(GunTool), "_isReloading");
         private static ConfigEntry<bool> enabledSetting;
-        private static ConfigEntry<float> magnification;
         private static ManualLogSource log;
         private static Harmony harmony;
         private static MusketScope active;
@@ -26,15 +25,16 @@ namespace TonyMods
         private Texture2D mask;
         private Renderer[] hiddenRenderers;
         private bool[] rendererStates;
-        private bool aiming, failed;
+        private readonly ScopeCycle cycle = new ScopeCycle();
+        private bool aiming { get { return cycle.IsActive; } }
+        private bool failed;
+        private GUIStyle zoomLabel;
         private float originalFov, appliedFov;
 
         internal static void Initialize(ConfigFile config, ManualLogSource logger)
         {
             log = logger;
-            enabledSetting = config.Bind("GunScope", "Enabled", true, "Add a physical scope to the musket. Aim/block toggles magnification (default right mouse / controller L2).");
-            magnification = config.Bind("GunScope", "Magnification", 3f,
-                new ConfigDescription("Optical magnification; original damage and shot spread are preserved.", new AcceptableValueRange<float>(1.5f, 6f)));
+            enabledSetting = config.Bind("GunScope", "Enabled", true, "Add a physical scope to the musket. Aim/block cycles 3x, 6x, off (default right mouse / controller L2).");
             if (StateField == null || ReloadField == null) throw new MissingFieldException("GunTool scope API changed");
             harmony = new Harmony(PatchId);
             try
@@ -43,7 +43,7 @@ namespace TonyMods
                 Patch("RaycastShot", "BeforeRaycast", true);
                 harmony.Patch(AccessTools.Method(typeof(GunTool), "RaycastShot"), finalizer: new HarmonyMethod(typeof(MusketScope), "AfterRaycast"));
                 harmony.Patch(AccessTools.Method(typeof(PlayerInput), "GetLookInput"), postfix: new HarmonyMethod(typeof(MusketScope), "ScaleLook"));
-                log.LogInfo("Musket scope ready: physical brass scope + toggle aim + 3x default; native shot spread preserved.");
+                log.LogInfo("Musket scope ready: physical brass scope + 3x / 6x / off aim cycle; native shot spread preserved.");
             }
             catch { harmony.UnpatchSelf(); harmony = null; throw; }
         }
@@ -95,7 +95,11 @@ namespace TonyMods
             if (model != null) model.SetActive(enabledSetting.Value);
             if (!CanAim()) { ExitAim(); return; }
             if (!PlayerInput.Instance.GetAimInputDown()) return;
-            if (aiming) ExitAim();
+            if (aiming)
+            {
+                if (cycle.Magnification == 6) ExitAim();
+                else { cycle.Advance(); ApplyZoom(); }
+            }
             else
             {
                 if (active != null) active.ExitAim();
@@ -103,7 +107,7 @@ namespace TonyMods
                 if (cam == null || cam.orthographic) return;
                 originalFov = cam.fieldOfView;
                 appliedFov = originalFov;
-                aiming = true; active = this;
+                cycle.Advance(); active = this;
                 HideHands();
                 ApplyZoom();
             }
@@ -125,14 +129,14 @@ namespace TonyMods
 
         private void ApplyZoom()
         {
-            appliedFov = ScopeMath.ZoomFov(originalFov, magnification.Value);
+            appliedFov = ScopeMath.ZoomFov(originalFov, cycle.Magnification);
             cam.fieldOfView = appliedFov;
         }
 
         private void ExitAim()
         {
             if (aiming && cam != null && Mathf.Abs(cam.fieldOfView - appliedFov) < .01f) cam.fieldOfView = originalFov;
-            aiming = false; cam = null;
+            cycle.Reset(); cam = null;
             if (hiddenRenderers != null)
                 for (int i = 0; i < hiddenRenderers.Length; i++)
                     if (hiddenRenderers[i] != null) hiddenRenderers[i].enabled = rendererStates[i];
@@ -276,6 +280,11 @@ namespace TonyMods
             GUI.DrawTexture(new Rect(cx - line / 2, cy - side * .46f, line, side * .92f), Texture2D.whiteTexture);
             GUI.color = new Color(.8f, .14f, .1f);
             GUI.DrawTexture(new Rect(cx - line, cy - line, line * 2, line * 2), Texture2D.whiteTexture);
+            if (zoomLabel == null) zoomLabel = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
+            zoomLabel.fontSize = Mathf.RoundToInt(18 * line);
+            zoomLabel.normal.textColor = Color.white;
+            GUI.color = Color.white;
+            GUI.Label(new Rect(cx - 50 * line, cy + side * .32f, 100 * line, 30 * line), cycle.Magnification + "x", zoomLabel);
             GUI.color = previous; GUI.depth = depth; GUI.matrix = matrix;
         }
     }

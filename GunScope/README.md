@@ -1,12 +1,12 @@
 # Musket scope
 
 - 原版槍 `Musket_fp` 加裝黃銅鏡環、鏡筒、鏡片及支架，跟隨 `MusketRoot/Musket` 動畫。
-- 右鍵（原生 Aim/block 綁定；手把 L2）切換圓形鏡框、十字線與放大視野。預設 3×，以透視公式換算 FOV，並同步降低瞄準靈敏度。
+- 右鍵（原生 Aim/block 綁定；手把 L2）依序切換 3× → 6× → 收起；圓形鏡框顯示目前倍率。兩個倍率皆依原始 FOV 計算，不會疊乘成 18×，並同步降低瞄準靈敏度。
 - 開鏡時隱藏第一人稱手部與武器 renderer，關閉後還原原本的 enabled 狀態。
-- 裝填、換槍、開背包／選單、死亡、失去視窗焦點、離開場景與停用元件時解除開鏡。
+- 裝填、換槍、開背包／選單、死亡、失去視窗焦點、離開場景與停用元件時解除開鏡，下次右鍵重新從 3× 開始。
 - `RaycastShot` 在同步呼叫期間使用原 FOV，finalizer 即使遇到例外也恢復放大 FOV；原生散布、傷害、彈藥與射速不變。
 - 只修改本機第一人稱槍的外觀／視野，沒有新增物品或變更存檔；其他玩家的第三人稱槍模型不包含附加鏡筒。弩不受影響。
-- 設定：既有 BepInEx plugin config 的 `[GunScope]`，`Enabled=true`、`Magnification=3`（1.5–6）。
+- 設定：既有 BepInEx plugin config 的 `[GunScope]`，`Enabled=true`。倍率固定循環 3×／6×；舊版 `Magnification` 設定不再使用。
 
 ## Validation
 
