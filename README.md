@@ -1,3 +1,8 @@
+## 0.12.3 修正瞄準鏡未掛上火槍
+
+- 手持槍是 `Instantiate` 產生的 `Musket_fp(Clone)`，舊版以名稱比對 `Musket_fp` 永遠不成立，鏡筒與右鍵瞄準都沒有啟用。改以原生火槍 mesh `MusketRoot/Musket/Musket1_2_1` 辨識；弩同樣有 `MusketRoot/Musket` 但沒有該 mesh，維持不受影響。
+- `tests/run-scope.ps1` 改為檢查 mesh 過濾並禁止以物件名稱過濾，同時確認原生手持工具仍由 `fpPrefab` Instantiate 產生。
+
 ## 0.12.1 右鍵三段瞄準循環
 
 - 右鍵依序切換 **3× → 6× → 收起**；外觀不變，鏡內顯示目前倍率。

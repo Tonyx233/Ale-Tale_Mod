@@ -12,6 +12,9 @@ namespace TonyMods
     public sealed class MusketScope : MonoBehaviour
     {
         private const string PatchId = "Tony.MusketScope";
+        // Held guns are Instantiate() clones named "Musket_fp(Clone)", and Crossbow_fp also has
+        // MusketRoot/Musket, so only the native musket mesh identifies the musket.
+        private const string MountPath = "MusketRoot/Musket", MusketMesh = "Musket1_2_1";
         private static readonly FieldInfo StateField = AccessTools.Field(typeof(GunTool), "_state");
         private static readonly FieldInfo ReloadField = AccessTools.Field(typeof(GunTool), "_isReloading");
         private static ConfigEntry<bool> enabledSetting;
@@ -66,10 +69,11 @@ namespace TonyMods
 
         private static void GunUpdated(GunTool __instance)
         {
-            if (!enabledSetting.Value || __instance.name != "Musket_fp") return;
+            if (!enabledSetting.Value) return;
             MusketScope scope = __instance.GetComponent<MusketScope>();
             if (scope == null)
             {
+                if (__instance.transform.Find(MountPath + "/" + MusketMesh) == null) return;
                 scope = __instance.gameObject.AddComponent<MusketScope>();
                 scope.gun = __instance;
                 try { scope.BuildModel(); }
@@ -210,8 +214,8 @@ namespace TonyMods
 
         private void BuildModel()
         {
-            Transform mount = transform.Find("MusketRoot/Musket");
-            if (mount == null || mount.Find("Musket1_2_1") == null) throw new InvalidOperationException("Native musket model mount missing");
+            Transform mount = transform.Find(MountPath);
+            if (mount == null || mount.Find(MusketMesh) == null) throw new InvalidOperationException("Native musket model mount missing");
             metal = MakeMaterial("Tony Scope Blued Steel", new Color(.065f, .073f, .08f), .75f);
             brass = MakeMaterial("Tony Scope Brass", new Color(.43f, .29f, .11f), .8f);
             glass = MakeMaterial("Tony Scope Glass", new Color(.04f, .19f, .22f), .6f);
@@ -230,7 +234,7 @@ namespace TonyMods
                 Part("Mount foot", PrimitiveType.Cube, new Vector3(x, -.039f, 0), new Vector3(.022f, .055f, .035f), metal, false);
             }
             Part("Elevation dial", PrimitiveType.Cylinder, new Vector3(0, .030f, 0), new Vector3(.027f, .009f, .027f), brass, false);
-            log.LogInfo("Physical scope attached to Musket_fp/MusketRoot/Musket.");
+            log.LogInfo("Physical scope attached to " + name + "/" + MountPath + ".");
         }
 
         private void Part(string name, PrimitiveType type, Vector3 position, Vector3 scale, Material material, bool barrelAxis)
