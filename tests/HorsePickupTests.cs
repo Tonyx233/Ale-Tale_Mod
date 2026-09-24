@@ -37,7 +37,7 @@ class Net { public ulong LocalClientId = 0; public bool IsServer = true; public 
 class Logger { public void LogInfo(string text) { } }
 class Wire { public int op; public Vector3 position; }
 class ItemData { public ushort id; }
-struct Item { public ushort dataId, amount; public Item(ItemData data) { dataId = data.id; amount = 1; } }
+struct Item { public ushort dataId, amount; public Item(ItemData data) { dataId = data.id; amount = 9999; } }
 class ContainerNet
 {
     public int Free = 1;

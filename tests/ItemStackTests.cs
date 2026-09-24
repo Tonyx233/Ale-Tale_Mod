@@ -71,6 +71,20 @@ internal static class ItemStackTests
             Check(ItemStacks.Capacity(data) == 9999, "All item capacities");
             Check(data.maxStack == original, "Vanilla generation amount must be unchanged");
         }
+        // Horse items are registered after stack initialization; capacity must be dynamic.
+        var horse = Data(47920, 1, 1, ItemData.Type.Material);
+        var horse2 = Data(47921, 1, 1, ItemData.Type.Material);
+        Check(!StackRules.Compatible(new Item(horse), new Item(horse2)), "Horse variants never merge");
+        foreach (var variant in new[] { horse, horse2 })
+        {
+            Check(ItemStacks.Capacity(variant) == 9999 && new Item(variant).amount == 1, "Late horse registration keeps single purchase and 9999 capacity");
+            var horseBag = Bag(variant, 9998, 1);
+            ushort horseLeft;
+            Check(horseBag.AddNewItem(new Item(variant) { amount = 1 }, out horseLeft, false) && horseLeft == 0 && horseBag.items.Single().amount == 9999, "Horse return merges into occupied bag");
+            Check(!horseBag.AddNewItem(new Item(variant), out horseLeft, false) && horseLeft == 1, "Full horse stack retains unaccepted item");
+            horseBag.slots = 2;
+            Check(horseBag.AddNewItem(new Item(variant), out horseLeft, false) && horseLeft == 0 && horseBag.items.Count == 2 && Count(horseBag, variant.id) == 10000, "Horse overflow creates second slot without loss");
+        }
         Item a = new Item(tool), b = a;
         Check(StackRules.Compatible(a, b), "Identical tools stack");
         foreach (string field in new[] { "dataId", "rarity", "charge", "durability", "repairCount", "metaInt", "weaponDamage", "weaponDamageDeviation", "weaponChargedHitDamageMul" })

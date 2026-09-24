@@ -186,7 +186,7 @@ namespace TonyMods
             { Note(sender, "Horse item is unavailable, so the horse stays here."); return false; }
             if (!ContainerManager.Instance.GetPlayerContainer(sender, out container))
             { Note(sender, "Inventory not found, so the horse stays here."); return false; }
-            if (!container.AddNewItem(new Item(data), out left, false) || left > 0)
+            if (!container.AddNewItem(new Item(data) { amount = 1 }, out left, false) || left > 0)
             { Note(sender, "Inventory is full. Free a slot to store the horse."); return false; }
             horses.Remove(horse.Id); Destroy(horse.gameObject);
             log.LogInfo("Horse stored: horse=" + horse.Id + "; variant=" + horse.Variant + "; client=" + sender);
