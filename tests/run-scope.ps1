@@ -7,7 +7,8 @@ $output = Join-Path $root 'bin\ScopeMathTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Scope test compilation failed' }
 & $output
 if ($LASTEXITCODE -ne 0) { throw 'Scope math checks failed' }
-Add-Type -Path (Join-Path $GamePath 'BepInEx\core\Mono.Cecil.dll')
+# Load from bytes: Add-Type -Path refuses the downloaded (Zone.Identifier) BepInEx copy of Cecil.
+[void][Reflection.Assembly]::Load([IO.File]::ReadAllBytes((Join-Path $GamePath 'BepInEx\core\Mono.Cecil.dll')))
 $game = [Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $GamePath 'Ale and Tale Tavern_Data\Managed\Assembly-CSharp.dll'))
 $mod = [Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $root 'bin\Tony.TeammateHealthBars.dll'))
 try {
