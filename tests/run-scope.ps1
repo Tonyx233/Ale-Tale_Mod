@@ -7,7 +7,6 @@ $output = Join-Path $root 'bin\ScopeMathTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Scope test compilation failed' }
 & $output
 if ($LASTEXITCODE -ne 0) { throw 'Scope math checks failed' }
-# Load from bytes: Add-Type -Path refuses the downloaded (Zone.Identifier) BepInEx copy of Cecil.
 [void][Reflection.Assembly]::Load([IO.File]::ReadAllBytes((Join-Path $GamePath 'BepInEx\core\Mono.Cecil.dll')))
 $game = [Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $GamePath 'Ale and Tale Tavern_Data\Managed\Assembly-CSharp.dll'))
 $mod = [Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $root 'bin\Tony.TeammateHealthBars.dll'))
@@ -26,8 +25,12 @@ try {
     foreach ($name in @('GunUpdated','BeforeRaycast','AfterRaycast','ScaleLook','OnDisable','OnDestroy','OnApplicationFocus')) {
         if (!($scope.Methods | Where-Object Name -eq $name)) { throw "Missing scope handler: $name" }
     }
+    # Held tools are Instantiate() clones ("Musket_fp(Clone)"), so the filter cannot use the prefab name.
+    $spawn = (($game.MainModule.Types | Where-Object Name -eq PlayerInventory).Methods | Where-Object Name -eq OnInventoryAdd).Body.Instructions | ForEach-Object ToString
+    if (!($spawn -match 'ItemData::fpPrefab') -or !($spawn -match 'Object::Instantiate')) { throw 'Native fp tool spawn changed; re-check musket identification' }
     $body = ($scope.Methods | Where-Object Name -eq GunUpdated).Body.Instructions | ForEach-Object ToString
-    if (!($body -match 'ldstr "Musket_fp"')) { throw 'Musket-only filter missing; crossbow must remain unchanged' }
+    if (!($body -match 'ldstr "MusketRoot/Musket/Musket1_2_1"')) { throw 'Musket-only mesh filter missing; crossbow must remain unchanged' }
+    if ($body -match 'get_name') { throw 'Regression: GunUpdated filters by GameObject name, but held guns are named Musket_fp(Clone)' }
     foreach ($name in @('HorseStable','ItemStacks','YouTubeJukeboxPanel')) {
         if (!($mod.MainModule.Types | Where-Object Name -eq $name)) { throw "Combined pack lost $name" }
     }
