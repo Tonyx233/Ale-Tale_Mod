@@ -34,7 +34,9 @@ namespace TonyMods
         }
         public Vector3 Position { get { return vehiclePosition; } }
         public float Yaw { get { return vehicleRotation.eulerAngles.y; } }
-        private const float MountRange = 3f, CartRadius = 0.55f;
+        // Host callback that moves this horse into the sender's inventory; false leaves it parked.
+        public Func<TavernHorse, ulong, bool> Collect { get; set; }
+        private const float MountRange = 3f, CartRadius = 0.55f, PickupRange = 3f, PickupHoldSeconds = 1f;
         private static TavernHorse Active
         {
             get { foreach (var h in all) if (h.localSeat >= 0) return h; return null; }
@@ -54,7 +56,9 @@ namespace TonyMods
 
         private ManualLogSource log;
         private GameObject cart;
-        private BoxCollider parkedCollider;
+        private BoxCollider parkedCollider, pickupCollider;
+        private Interactive pickup;
+        private bool collected;
         private PlayerNet rider;
         private PlayerMovement movement;
         private CharacterController controller;
@@ -192,7 +196,7 @@ namespace TonyMods
         {
             bool connected = sender == network.LocalClientId;
             foreach (ulong id in network.ConnectedClientsIds) if (id == sender) connected = true;
-            if (!connected || !(packet.op == 0 || packet.op == 1 || packet.op == 2 || (packet.op >= 7 && packet.op < 7 + seats.Capacity))) return;
+            if (!connected || collected || !(packet.op == 0 || packet.op == 1 || packet.op == 2 || packet.op == 3 || (packet.op >= 7 && packet.op < 7 + seats.Capacity))) return;
             if (packet.op == 0) { peers[sender] = Time.unscaledTime; return; }
             if (!peers.ContainsKey(sender)) return;
             float previous;
@@ -232,6 +236,14 @@ namespace TonyMods
                 seats.Remove(sender);
                 if (sender == network.LocalClientId) ExitAt(exit);
                 else Send(sender, new Wire { op = 5, position = exit });
+            }
+            else if (packet.op == 3)
+            {
+                // Seats are untouched either way; the stable reports storage results itself.
+                string refusal = PickupRefusal(sender, player);
+                if (refusal != null) Note(sender, refusal);
+                else if (Collect != null && Collect(this, sender)) collected = true;
+                return;
             }
             Broadcast();
         }
@@ -296,6 +308,27 @@ namespace TonyMods
             return false;
         }
         private void Note(ulong target, string text) { if (target == network.LocalClientId) Tell(text); else Send(target, new Wire { op = 6, message = text }); }
+        // Parked body box shared by the blocking collider and the native X/remove target.
+        private Vector3 BodyCenter { get { return new Vector3(0, 1.2f, -Extension * .5f); } }
+        private Vector3 BodyHalfSize { get { return new Vector3(.45f, 1.2f, 1.35f + Extension * .5f); } }
+        private float BodyDistance(Vector3 point)
+        {
+            Vector3 local = Quaternion.Inverse(vehicleRotation) * (point - vehiclePosition) - BodyCenter, half = BodyHalfSize;
+            float x = Mathf.Max(Mathf.Abs(local.x) - half.x, 0), y = Mathf.Max(Mathf.Abs(local.y) - half.y, 0), z = Mathf.Max(Mathf.Abs(local.z) - half.z, 0);
+            return Mathf.Sqrt(x * x + y * y + z * z);
+        }
+        // Native furniture lets the host forbid guests from removing placed objects; horses follow the same switch.
+        private static bool GuestRemovalForbidden()
+        { return FurnitureManager.Instance != null && FurnitureManager.Instance.forbidClientsRemoveFurniture.Value; }
+        private string PickupRefusal(ulong sender, PlayerNet player)
+        {
+            if (cart == null) return "Horse is not ready. Try again.";
+            if (seats.Count > 0) return "Everyone must dismount before the horse can be stored.";
+            // Native X reaches 2m from the camera; allow latency slack but not remote storage.
+            if (BodyDistance(player.transform.position) > PickupRange) return "Move closer to the horse to store it.";
+            if (sender != network.LocalClientId && GuestRemovalForbidden()) return "The host does not allow guests to remove furniture.";
+            return null;
+        }
         private void Broadcast()
         {
             Wire state = new Wire { op = 4, revision = ++serial, exists = cart != null, occupants = seats.Encode(), position = vehiclePosition, yaw = vehicleRotation.eulerAngles.y };
@@ -423,6 +456,7 @@ namespace TonyMods
                 cart.transform.SetPositionAndRotation(Vector3.Lerp(cart.transform.position, vehiclePosition, Mathf.Clamp01(Time.unscaledDeltaTime * 15)), Quaternion.Slerp(cart.transform.rotation, vehicleRotation, Mathf.Clamp01(Time.unscaledDeltaTime * 15)));
             else cart.transform.SetPositionAndRotation(vehiclePosition, vehicleRotation);
             parkedCollider.enabled = seats.Count == 0;
+            UpdatePickup();
             cart.SetActive(SceneName == SceneManager.GetActiveScene().name);
             if (model != null) model.Animate(Time.deltaTime, IsAirborne());
             if (localSeat > 0 && rider != null)
@@ -439,6 +473,18 @@ namespace TonyMods
                 PlayerManager.LocalPlayerPosition = rider.transform.position;
             }
         }
+        private void UpdatePickup()
+        {
+            if (pickup == null) return;
+            // Riders or a pending store hide the native X prompt, like the blocking box.
+            pickupCollider.enabled = parkedCollider.enabled && !collected;
+            pickup.IsRemoveAvailable = pickupCollider.enabled && (network.IsServer || !GuestRemovalForbidden());
+        }
+        // Native PlayerInventory.RemoveChecks fires RemoveHold after the X hold completes; the host validates.
+        private void PickupInteract(Interactive.Event action, ushort dataId, uint itemId)
+        { if (action == Interactive.Event.RemoveHold && localSeat < 0) Request(3); }
+        private static string RemoveKeyName()
+        { return AppSettingsManager.Instance == null ? "X" : AppSettingsManager.Instance.appSettings.keybinds.remove.ToString(); }
         private sealed class SpeedState { public float ground, air; }
         private bool GroundBelow(float distance, out RaycastHit ground)
         {
@@ -508,7 +554,7 @@ namespace TonyMods
         private void OnGUI()
         {
             if (network==null || !enabledSetting.Value || (Active != this && Nearest != this)) return;
-            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift | Jump key | E exit | Ctrl+F1-F"+seats.Capacity+": seat" : localSeat>0 ? "Passenger | E exit | Ctrl+F1-F"+seats.Capacity+": seat" : CanInput()&&NearCart() ? "E: Mount horse ("+seats.Count+"/"+seats.Capacity+")" : "";
+            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift | Jump key | E exit | Ctrl+F1-F"+seats.Capacity+": seat" : localSeat>0 ? "Passenger | E exit | Ctrl+F1-F"+seats.Capacity+": seat" : CanInput()&&NearCart() ? "E: Mount horse ("+seats.Count+"/"+seats.Capacity+")"+(pickup!=null&&pickup.IsRemoveAvailable ? " | Hold "+RemoveKeyName()+" on horse: store in inventory" : "") : "";
             if (!String.IsNullOrEmpty(text)) GUI.Box(new Rect(Screen.width/2-270,Screen.height-175,540,35),text);
         }
         private void OnDestroy() { Unbind(); all.Remove(this); }
@@ -545,11 +591,36 @@ namespace TonyMods
             cart = new GameObject(Variant == HorseVariant.Extended ? "Tony Five Seat Horse" : "Tony Two Seat Horse"); cart.transform.SetParent(transform, false);
             model = HorseModel.Create(cart.transform, Variant);
             parkedCollider = cart.AddComponent<BoxCollider>();
-            parkedCollider.center = new Vector3(0,1.2f,-Extension*.5f); parkedCollider.size = new Vector3(.9f,2.4f,2.7f+Extension);
+            parkedCollider.center = BodyCenter; parkedCollider.size = BodyHalfSize * 2;
+            BuildPickup();
+        }
+        // The native X ray only hits interactive layers. NonCollidingInteractive is in that mask and never
+        // collides with players, so the Default-layer box above keeps the parked horse's physics unchanged.
+        private void BuildPickup()
+        {
+            int layer = LayerMask.NameToLayer("NonCollidingInteractive");
+            if (layer < 0 || DebugLog.Instance == null) { log.LogWarning("Horse store prompt unavailable: native interactive layer missing."); return; }
+            if (PlayerInventory.Instance != null && (PlayerInventory.Instance.interactibleLM.value & (1 << layer)) == 0)
+                log.LogWarning("Horse store prompt may be unreachable: native interaction mask changed.");
+            GameObject target = new GameObject("Tony Horse Store Target"); target.layer = layer;
+            target.transform.SetParent(cart.transform, false);
+            // A prompt failure must never stop the horse spawning: a missing horse would be dropped from the next sidecar save.
+            try
+            {
+                pickupCollider = target.AddComponent<BoxCollider>();
+                pickupCollider.center = BodyCenter; pickupCollider.size = BodyHalfSize * 2;
+                pickup = target.AddComponent<Interactive>();
+                pickup.layer = Interactive.Layer.Useable; pickup.removeHoldTime = PickupHoldSeconds;
+                pickup.ObjectTitle = Variant == HorseVariant.Extended ? "TonyHorse2Title" : "TonyHorseTitle";
+                pickup.RemoveDescr = "TonyHorseStore";
+                pickup.onInteract += PickupInteract;
+            }
+            catch (Exception ex)
+            { log.LogWarning("Horse store prompt disabled: " + ex.Message); Destroy(target); pickup = null; pickupCollider = null; }
         }
         private void RemoveCart()
         {
-            if (cart != null) Destroy(cart); cart = null; parkedCollider = null; model = null;
+            if (cart != null) Destroy(cart); cart = null; parkedCollider = pickupCollider = null; pickup = null; model = null;
         }
     }
 }

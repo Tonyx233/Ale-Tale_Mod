@@ -58,7 +58,7 @@ namespace TonyMods
             patches.Patch(AccessTools.Method(typeof(SaveManager), "NewGame"), prefix: new HarmonyMethod(typeof(HorseStable), "BeforeNewGame"));
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             StartCoroutine(Localize());
-            log.LogInfo("Tony horses 0.9.0: original item 47920 (2 seats/4 legs); Horse 2 item 47921 (5 seats/10 legs); E mount; Ctrl+F1-F5 switch seats.");
+            log.LogInfo("Tony horses 0.10.0: original item 47920 (2 seats/4 legs); Horse 2 item 47921 (5 seats/10 legs); E mount; Ctrl+F1-F5 switch seats; hold X on an empty horse to store it.");
         }
         private void Update()
         {
@@ -75,7 +75,7 @@ namespace TonyMods
                 Disconnect(); network = net;
                 network.CustomMessagingManager.RegisterNamedMessageHandler(Channel, Receive);
                 nextManifest = 0; nextSyncWarning = Time.unscaledTime + 10; receivedManifest = false;
-                log.LogInfo("Horse sync 0.9.0 bound; server=" + network.IsServer);
+                log.LogInfo("Horse sync 0.10.0 bound; server=" + network.IsServer);
             }
             if (network.IsServer && !loaded && PlayerNet.Instance != null && PlayerNet.Instance.IsSpawned)
             {
@@ -170,9 +170,28 @@ namespace TonyMods
             try
             {
                 TavernHorse h = go.AddComponent<TavernHorse>(); h.Initialize(config, log, network, r.id, r.scene, r.position, r.yaw, r.variant);
-                horses.Add(r.id, h);
+                h.Collect = CollectHorse; horses.Add(r.id, h);
             }
             catch { Destroy(go); throw; }
+        }
+        // Host-only X/remove store, mirroring native furniture pickup. Unlike furniture, a full
+        // inventory keeps the horse parked instead of dropping its item on the ground.
+        private bool CollectHorse(TavernHorse horse, ulong sender)
+        {
+            TavernHorse current;
+            if (network == null || !network.IsServer || !horses.TryGetValue(horse.Id, out current) || current != horse) return false;
+            bool extended = horse.Variant == HorseVariant.Extended;
+            ItemData data; ContainerNet container; ushort left;
+            if (!(extended ? item2Ready : itemReady) || !ItemManager.Instance.GetItemData(extended ? Item2Id : ItemId, out data))
+            { Note(sender, "Horse item is unavailable, so the horse stays here."); return false; }
+            if (!ContainerManager.Instance.GetPlayerContainer(sender, out container))
+            { Note(sender, "Inventory not found, so the horse stays here."); return false; }
+            if (!container.AddNewItem(new Item(data), out left, false) || left > 0)
+            { Note(sender, "Inventory is full. Free a slot to store the horse."); return false; }
+            horses.Remove(horse.Id); Destroy(horse.gameObject);
+            log.LogInfo("Horse stored: horse=" + horse.Id + "; variant=" + horse.Variant + "; client=" + sender);
+            Note(sender, extended ? "Horse 2 returned to your inventory." : "Horse returned to your inventory."); Broadcast();
+            return true;
         }
         private void Disconnect()
         {
@@ -306,11 +325,17 @@ namespace TonyMods
             var table=handle.Result;if(table==null)yield break;
             bool zh=LocalizationSettings.SelectedLocale!=null && LocalizationSettings.SelectedLocale.Identifier.Code.StartsWith("zh",StringComparison.OrdinalIgnoreCase);
             SetText(table,"TonyHorseName",zh?"牛馬":"Two-seat Horse");
-            SetText(table,"TonyHorseDescription",zh?"可供一位駕駛與一位乘客騎乘。於戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+F1/F2 換位。":"Use from your inventory outdoors to place a horse for a driver and passenger. E mounts, Shift boosts, Ctrl+F1/F2 switches seats.");
+            SetText(table,"TonyHorseDescription",zh?"可供一位駕駛與一位乘客騎乘。於戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+F1/F2 換位；無人騎乘時對準馬長按 X 收回背包。":"Use from your inventory outdoors to place a horse for a driver and passenger. E mounts, Shift boosts, Ctrl+F1/F2 switches seats. Hold X on an empty horse to store it.");
             SetText(table,"TonyHorseUse",zh?"戶外使用：放置雙人馬":"Use outdoors: place horse");
             SetText(table,"TonyHorse2Name",zh?"牛馬2":"Horse 2");
-            SetText(table,"TonyHorse2Description",zh?"五座十腿牛馬，可供一位駕駛與四位乘客騎乘。於空曠戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+F1～F5 換位。":"Five saddles and ten legs: one driver and four passengers. Use outdoors in a clear area. E mounts, Shift boosts, Ctrl+F1-F5 switches seats.");
+            SetText(table,"TonyHorse2Description",zh?"五座十腿牛馬，可供一位駕駛與四位乘客騎乘。於空曠戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+F1～F5 換位；無人騎乘時對準馬長按 X 收回背包。":"Five saddles and ten legs: one driver and four passengers. Use outdoors in a clear area. E mounts, Shift boosts, Ctrl+F1-F5 switches seats. Hold X on an empty horse to store it.");
             SetText(table,"TonyHorse2Use",zh?"戶外使用：放置五座十腿牛馬2":"Use outdoors: place five-seat Horse 2");
+            // Native look-at prompt (title and "[X] - text") reads the Interactive table.
+            var prompts=LocalizationSettings.StringDatabase.GetTableAsync("Interactive"); yield return prompts;
+            if(prompts.Result==null)yield break;
+            SetText(prompts.Result,"TonyHorseTitle",zh?"牛馬":"Two-seat Horse");
+            SetText(prompts.Result,"TonyHorse2Title",zh?"牛馬2":"Horse 2");
+            SetText(prompts.Result,"TonyHorseStore",zh?"收回背包":"Store in inventory");
         }
         private static void SetText(UnityEngine.Localization.Tables.StringTable table, string key, string value)
         { var entry=table.GetEntry(key); if(entry==null)table.AddEntry(key,value); else entry.Value=value; }
