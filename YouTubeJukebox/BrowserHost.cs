@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -10,8 +10,8 @@ using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-[assembly: System.Reflection.AssemblyVersion("0.8.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.8.1.0")]
+[assembly: System.Reflection.AssemblyVersion("0.11.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.11.1.0")]
 
 namespace TonyMods
 {
@@ -82,14 +82,16 @@ namespace TonyMods
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(1100, 650);
             MinimumSize = new Size(1000, 600);
-            Text = "YouTube Jukebox - Tony";
-            BackColor = Color.FromArgb(20, 20, 20);
+            Text = "YouTube 點唱機 - Tony";
+            BackColor = Color.FromArgb(24, 27, 33);
+            ForeColor = Color.FromArgb(242, 244, 248);
+            Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Regular);
             if (test) Opacity = 0;
             browser.Dock = DockStyle.Fill;
             Panel content = new Panel { Dock = DockStyle.Fill };
             TableLayoutPanel layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             Controls.Add(layout);
@@ -99,42 +101,42 @@ namespace TonyMods
             BuildQueuePanel(split.Panel2);
             content.Controls.Add(browser);
             status.Dock = DockStyle.Fill;
-            status.Text = "Loading YouTube player...";
+            status.Text = "正在載入 YouTube 播放器…";
             status.ForeColor = Color.White;
             status.BackColor = BackColor;
             status.TextAlign = ContentAlignment.MiddleCenter;
             content.Controls.Add(status);
             TableLayoutPanel toolbar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 6, RowCount = 1, Padding = new Padding(4) };
             toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 5; i++) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
+            for (int i = 0; i < 5; i++) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
             toolbar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             address.Dock = DockStyle.Fill;
             address.MaxLength = 2048;
             address.ShortcutsEnabled = true;
             address.KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { PlayAddress(); e.SuppressKeyPress = true; } };
             toolbar.Controls.Add(address, 0, 0);
-            Button play = new Button { Text = "Add last", Dock = DockStyle.Fill };
-            Button insert = new Button { Text = "Play next", Dock = DockStyle.Fill };
-            Button immediate = new Button { Text = "Play now", Dock = DockStyle.Fill };
-            Button clear = new Button { Text = "Clear", Dock = DockStyle.Fill };
+            Button play = new Button { Text = "加入待播", Dock = DockStyle.Fill };
+            Button insert = new Button { Text = "下一首播", Dock = DockStyle.Fill };
+            Button immediate = new Button { Text = "立即播放", Dock = DockStyle.Fill };
+            Button clear = new Button { Text = "清空網址", Dock = DockStyle.Fill };
             play.Click += delegate { PlayAddress(); };
             insert.Click += delegate { PlayAddress("insert"); };
             immediate.Click += delegate { PlayAddress("now"); };
             clear.Click += delegate { address.Clear(); address.Focus(); };
-            Button paste = new Button { Text = "Paste", Dock = DockStyle.Fill };
+            Button paste = new Button { Text = "貼上", Dock = DockStyle.Fill };
             paste.Click += delegate { try { address.Paste(); address.Focus(); } catch (Exception ex) { Console.WriteLine("PASTE_ERROR " + ex.Message); } };
             toolbar.Controls.Add(paste, 1, 0); toolbar.Controls.Add(play, 2, 0); toolbar.Controls.Add(insert, 3, 0); toolbar.Controls.Add(immediate, 4, 0); toolbar.Controls.Add(clear, 5, 0);
             layout.Controls.Add(toolbar, 0, 0);
             FlowLayoutPanel transport = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true };
-            Button pause = new Button { Text = "Pause", Width = 65 };
-            Button resume = new Button { Text = "Resume", Width = 70 };
+            Button pause = new Button { Text = "暫停", Width = 65 };
+            Button resume = new Button { Text = "繼續", Width = 70 };
             NumericUpDown seconds = new NumericUpDown { Maximum = 604800, Width = 80 };
-            Button seek = new Button { Text = "Seek (sec)", Width = 85 };
-            Button hide = new Button { Text = "Back to game", Width = 125 };
-            Button previous = new Button { Text = "Previous", Width = 75 };
-            Button next = new Button { Text = "Next", Width = 60 };
-            Button loop = new Button { Text = "Repeat mode", Width = 100 };
-            Button stop = new Button { Text = "Stop", Width = 60 };
+            Button seek = new Button { Text = "跳至秒數", Width = 85 };
+            Button hide = new Button { Text = "返回遊戲", Width = 125 };
+            Button previous = new Button { Text = "上一首", Width = 75 };
+            Button next = new Button { Text = "下一首", Width = 60 };
+            Button loop = new Button { Text = "切換循環", Width = 100 };
+            Button stop = new Button { Text = "停止", Width = 60 };
             previous.Click += delegate { QueueRequest("previous"); };
             next.Click += delegate { QueueRequest("next"); };
             loop.Click += delegate { QueueRequest("repeat"); };
@@ -146,8 +148,11 @@ namespace TonyMods
             transport.Controls.AddRange(new Control[] { previous, next, pause, resume, stop, seconds, seek, loop, hide });
             layout.Controls.Add(transport, 0, 1);
             playlistStatus.Dock = DockStyle.Fill; playlistStatus.ForeColor = Color.White;
-            playlistStatus.Text = "Add last / Play next keep the current song. Play now interrupts it. Controls require 8m proximity.";
+            playlistStatus.Text = "加入待播／下一首播會保留目前歌曲；立即播放會切換歌曲。請在點唱機 8 公尺內操作。";
             layout.Controls.Add(playlistStatus, 0, 2);
+            ApplyControlTheme(this);
+            immediate.BackColor = Color.FromArgb(35, 91, 160);
+            stop.BackColor = Color.FromArgb(140, 48, 56);
             Shown += Initialize;
             FormClosing += delegate(object s, FormClosingEventArgs e)
             {
@@ -156,6 +161,37 @@ namespace TonyMods
             FormClosed += delegate { resolver.Dispose(); titleClient.Dispose(); browser.Dispose(); parentTimer.Dispose(); testTimer.Dispose(); };
         }
 
+        // Set both colors explicitly so Windows themes cannot produce black-on-black buttons.
+        private static void ApplyControlTheme(Control parent)
+        {
+            foreach (Control control in parent.Controls)
+            {
+                Button button = control as Button;
+                if (button != null)
+                {
+                    button.UseVisualStyleBackColor = false;
+                    button.FlatStyle = FlatStyle.Flat;
+                    button.BackColor = Color.FromArgb(48, 54, 64);
+                    button.ForeColor = Color.FromArgb(242, 244, 248);
+                    button.FlatAppearance.BorderColor = Color.FromArgb(110, 122, 140);
+                    button.FlatAppearance.MouseOverBackColor = Color.FromArgb(65, 78, 96);
+                    button.FlatAppearance.MouseDownBackColor = Color.FromArgb(42, 64, 90);
+                    button.Height = 34;
+                }
+                else if (control is TextBox || control is NumericUpDown || control is ListView)
+                {
+                    control.BackColor = Color.FromArgb(245, 247, 250);
+                    control.ForeColor = Color.FromArgb(24, 27, 33);
+                }
+                else if (control is TabControl || control is TabPage)
+                {
+                    control.BackColor = SystemColors.Control;
+                    control.ForeColor = SystemColors.ControlText;
+                }
+                // WebView2 owns its child controls and renders the YouTube page itself.
+                if (!(control is WebView2)) ApplyControlTheme(control);
+            }
+        }
         private async void Initialize(object sender, EventArgs args)
         {
             try
@@ -239,7 +275,7 @@ namespace TonyMods
                         return;
                     }
                     status.Visible = !e.IsSuccess;
-                    if (!e.IsSuccess) status.Text = "Player could not load: " + e.WebErrorStatus;
+                    if (!e.IsSuccess) status.Text = "播放器載入失敗：" + e.WebErrorStatus;
                     Console.WriteLine(e.IsSuccess ? "NAVIGATION_OK" : "ERROR " + e.WebErrorStatus);
                 };
                 ready = true;
@@ -254,12 +290,12 @@ namespace TonyMods
                     else browser.NavigateToString("<html><body><p id='probe'>ready</p></body></html>");
                 }
                 else if (pendingVideo != null) Play(pendingVideo);
-                else status.Text = "Paste a YouTube video or playlist URL, then choose Add last, Play next, or Play now.";
+                else status.Text = "貼上 YouTube 影片或播放清單網址，再選擇加入待播、下一首播或立即播放。";
             }
             catch (Exception ex)
             {
                 Console.WriteLine("ERROR " + ex.Message.Replace('\n', ' '));
-                status.Text = "WebView2 could not start. Verify Microsoft Edge WebView2 Runtime is installed.";
+                status.Text = "WebView2 無法啟動，請確認已安裝 Microsoft Edge WebView2 Runtime。";
                 if (selfTest) { Environment.ExitCode = 1; Close(); }
             }
         }
@@ -324,7 +360,7 @@ namespace TonyMods
                 pendingVideo = null;
                 playerReady = false;
                 if (ready) browser.CoreWebView2.Navigate("about:blank");
-                status.Text = "Playback stopped.";
+                status.Text = "已停止播放。";
                 status.Visible = true;
                 return;
             }
@@ -347,7 +383,7 @@ namespace TonyMods
             playerReady = false;
             playerState = -1;
             if (!Visible) PrepareBackground();
-            status.Text = "Loading YouTube...";
+            status.Text = "正在載入 YouTube…";
             status.Visible = true;
             Console.WriteLine("LOCAL_PLAY " + id);
             browser.CoreWebView2.Navigate(PlayerOrigin + "/player?" + id);
@@ -357,7 +393,7 @@ namespace TonyMods
         {
             string id, list;
             if (!YouTubeUrl.TryGetSelection(address.Text, out id, out list))
-            { Console.WriteLine("INVALID_URL"); status.Text = "Enter a valid YouTube video or playlist URL."; status.Visible = true; address.Focus(); return; }
+            { Console.WriteLine("INVALID_URL"); status.Text = "請輸入有效的 YouTube 影片或播放清單網址。"; status.Visible = true; address.Focus(); return; }
             SendRequest(new JukeboxRequest { op=mode, video=id, playlist=list });
         }
 

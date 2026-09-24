@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Text;
@@ -25,13 +25,13 @@ namespace TonyMods
         private void BuildQueuePanel(Control parent)
         {
             var layout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=2};
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,66));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,84));
             var tabs=new TabControl {Dock=DockStyle.Fill};
-            foreach(var pair in new[]{new KeyValuePair<string,ListView>("Up next (drag to reorder)",queueView),new KeyValuePair<string,ListView>("History",historyView)})
+            foreach(var pair in new[]{new KeyValuePair<string,ListView>("待播清單（可拖曳排序）",queueView),new KeyValuePair<string,ListView>("播放紀錄",historyView)})
             {
                 var page=new TabPage(pair.Key); var view=pair.Value;
                 view.Dock=DockStyle.Fill;view.View=View.Details;view.FullRowSelect=true;view.MultiSelect=false;view.HideSelection=false;
-                view.Columns.Add("#",35);view.Columns.Add("Song",200);view.Columns.Add("Player",75);
+                view.Columns.Add("#",35);view.Columns.Add("歌曲",200);view.Columns.Add("玩家",75);
                 page.Controls.Add(view);tabs.TabPages.Add(page);
             }
             queueView.AllowDrop=true;
@@ -44,11 +44,11 @@ namespace TonyMods
             };
             queueView.DoubleClick+=delegate {SelectedRequest("playitem");};
             var buttons=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=true};
-            AddButton(buttons,"Up",55,delegate {MoveSelected(-1);});
-            AddButton(buttons,"Down",60,delegate {MoveSelected(1);});
-            AddButton(buttons,"Remove",75,delegate {SelectedRequest("remove");});
-            AddButton(buttons,"Play selected",100,delegate {SelectedRequest("playitem");});
-            AddButton(buttons,"Clear pending",115,delegate {QueueRequest("clear");});
+            AddButton(buttons,"上移",55,delegate {MoveSelected(-1);});
+            AddButton(buttons,"下移",60,delegate {MoveSelected(1);});
+            AddButton(buttons,"移除",75,delegate {SelectedRequest("remove");});
+            AddButton(buttons,"播放所選",100,delegate {SelectedRequest("playitem");});
+            AddButton(buttons,"清空待播",115,delegate {QueueRequest("clear");});
             layout.Controls.Add(tabs,0,0);layout.Controls.Add(buttons,0,1);
             resolver.Dock=DockStyle.Top;resolver.Height=210;resolver.Visible=false;
             parent.Controls.Add(layout);parent.Controls.Add(resolver);
@@ -105,8 +105,8 @@ namespace TonyMods
         private void RenderQueue()
         {
             RenderEntries(queueView,queueState.pending);RenderEntries(historyView,queueState.history);
-            playlistStatus.Text=(queueState.current==null?"No current song":(queueState.stopped?"Stopped: ":queueState.paused?"Paused: ":"Now: ")+EntryTitle(queueState.current))+
-                " | Pending "+queueState.pending.Length+"/200 | Repeat: "+new[]{"off","one","all"}[queueState.repeat]+"\r\n"+queueState.notice;
+            playlistStatus.Text=(queueState.current==null?"尚未播放歌曲":(queueState.stopped?"已停止：":queueState.paused?"已暫停：":"播放中：")+EntryTitle(queueState.current))+
+                " | 待播 "+queueState.pending.Length+"/200 | 循環："+new[]{"關閉","單曲","全部"}[queueState.repeat]+"\r\n"+queueState.notice;
         }
         private void RenderEntries(ListView view,JukeboxEntry[] entries)
         {
