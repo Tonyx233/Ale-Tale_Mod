@@ -2,7 +2,7 @@ const fs = require('fs'), path = require('path');
 // M4A1 carbine concept mesh. +Z is muzzle, +Y up, +X right; metres (real M4 ~0.84 m).
 // Same Definition format as Horse/Assets/model.json (bones + parts with authored topology).
 const bones = [], parts = [];
-const W = 1.18; // chunky width factor to match the game's stylised props
+const W = 1.06; // closer to the reference silhouette while retaining readable game-scale detail
 const C = {
   receiver: [.25, .262, .28], metal: [.17, .172, .18], rail: [.3, .31, .325], port: [.06, .06, .065],
   furniture: [.205, .2, .198], mag: [.34, .345, .35], rubber: [.1, .1, .105],
@@ -104,6 +104,50 @@ function prism(name, b, color, profile, x0, x1, role) {
 const box = (name, b, color, [cx, cy, cz], [w, h, d], role) =>
   prism(name, b, color, [[cz - d / 2, cy - h / 2], [cz + d / 2, cy - h / 2], [cz + d / 2, cy + h / 2], [cz - d / 2, cy + h / 2]], cx - w / 2, cx + w / 2, role);
 
+// Closed frame with a real opening; equal-length CCW profiles in the Z/Y plane.
+function frame(name, b, color, outer, inner, x0, x1, role) {
+  const p = mesh(name, b, color, role), n = outer.length;
+  for (const x of [x0, x1]) for (const loop of [outer, inner]) for (const [z, y] of loop) vertex(p, [x, y, z]);
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    for (const [offset, direction] of [[0, -1], [2 * n, 1]]) {
+      tri(p, offset + i, offset + j, offset + n + j, [direction, 0, 0]);
+      tri(p, offset + i, offset + n + j, offset + n + i, [direction, 0, 0]);
+    }
+    for (const [loop, off, sign] of [[outer, 0, 1], [inner, n, -1]]) {
+      const want = [0, -(loop[j][0] - loop[i][0]) * sign, (loop[j][1] - loop[i][1]) * sign];
+      tri(p, off + i, off + j, off + j + 2 * n, want);
+      tri(p, off + i, off + j + 2 * n, off + i + 2 * n, want);
+    }
+  }
+  return p;
+}
+function rounded(z, y, width, height, radius) {
+  const l = z - width / 2, r = z + width / 2, b = y - height / 2, t = y + height / 2;
+  return [[l + radius, b], [r - radius, b], [r, b + radius], [r, t - radius], [r - radius, t], [l + radius, t], [l, t - radius], [l, b + radius]];
+}
+// Combine repeated details with identical bone, role and colour into one renderer.
+function group(name, build) {
+  const start = parts.length;
+  build();
+  const pieces = parts.splice(start), p = pieces[0];
+  p.name = name;
+  for (const q of pieces.slice(1)) {
+    const offset = p.vertices.length / 3;
+    p.vertices.push(...q.vertices); p.triangles.push(...q.triangles.map(i => i + offset));
+  }
+  parts.push(p);
+  return p;
+}
+function rotateBore(p, angle) {
+  const c = Math.cos(angle), s = Math.sin(angle);
+  for (let i = 0; i < p.vertices.length; i += 3) {
+    const x = p.vertices[i], y = p.vertices[i + 1] - .02;
+    p.vertices[i] = x * c - y * s; p.vertices[i + 1] = .02 + x * s + y * c;
+  }
+  return p;
+}
+
 bone('rifle', '', [0, 0, 0]);
 bone('mag', 'rifle', [0, -.03, .13]);
 bone('charge', 'rifle', [0, .031, 0]);
@@ -112,10 +156,11 @@ bone('selector', 'rifle', [-.0135 * W - .004, -.018, .035]);
 
 const bore = .02, rw = .0145 * W, lw = .0135 * W;
 // Upper receiver with flat-top Picatinny rail.
-prism('Upper receiver', 'rifle', C.receiver, [[0, 0], [.178, 0], [.178, .034], [.012, .036], [0, .03]], -rw, rw);
+loft('Upper receiver', 'rifle', C.receiver, [[0, .018, 0, rw * .85, .017], [0, .018, .015, rw, .019], [0, .018, .166, rw, .019], [0, .018, .178, rw * .88, .017]], 12, undefined, Math.PI / 12);
 prism('Brass deflector', 'rifle', C.receiver, [[.045, .012], [.066, .012], [.058, .03], [.048, .03]], rw - .001, rw + .006);
 box('Ejection port', 'rifle', C.port, [rw + .0006, .018, .1], [.002, .018, .058]);
 box('Dust cover', 'rifle', C.metal, [rw + .0012, .0095, .1], [.0015, .006, .062]);
+loft('Dust cover hinge', 'rifle', C.rail, [[rw + .002, .006, .069, .0015, .0015], [rw + .002, .006, .131, .0015, .0015]], 8);
 cyl('Forward assist', 'rifle', C.metal, [rw + .005, .027, .03], 'x', .0065, .014, 8);
 box('Rail base', 'rifle', C.rail, [0, .04, .09], [.022 * W, .008, .174]);
 for (let z = .01; z < .175; z += .0104) box('Rail ridge', 'rifle', C.rail, [0, .0465, z + .002], [.024 * W, .005, .0052]);
@@ -146,37 +191,76 @@ prism('Pistol grip', 'rifle', C.furniture, [
 // Buffer tube + collapsible M4 stock (mid position).
 loft('Castle nut', 'rifle', C.metal, [[0, .012, -.018, .019, .019], [0, .012, -.029, .019, .019]], 8);
 loft('Buffer tube', 'rifle', C.metal, [[0, .012, -.029, .0155, .0155], [0, .012, -.205, .0155, .0155]], 12);
-prism('Stock slide', 'rifle', C.furniture, [[-.092, -.009], [-.092, .03], [-.105, .036], [-.236, .038], [-.236, -.009]], -.021 * W, .021 * W, 'furniture');
-prism('Stock web', 'rifle', C.furniture, [[-.118, -.008], [-.236, -.008], [-.236, -.078], [-.226, -.08], [-.19, -.058], [-.148, -.03]], -.0135 * W, .0135 * W, 'furniture');
+loft('Stock cheek rest', 'rifle', C.furniture, [[0, .018, -.239, .022 * W, .023], [0, .018, -.105, .022 * W, .022], [0, .018, -.092, .019 * W, .018]], 12, 'furniture');
+// Open lower stock triangle: the reference has a visible void, not a solid wedge.
+frame('Stock skeleton', 'rifle', C.furniture,
+  [[-.232, -.068], [-.126, -.009], [-.232, -.009]],
+  [[-.221, -.049], [-.159, -.016], [-.221, -.016]], -.008, .008, 'furniture');
+for (const side of [-1, 1]) group('Stock ventilation panel', () => {
+  for (let i = 0; i < 5; i++) frame('Stock slot', 'rifle', C.furniture,
+    rounded(-.222 + i * .023, -.002, .023, .017, .001),
+    rounded(-.222 + i * .023, -.002, .017, .005, .002),
+    side > 0 ? .019 : -.024, side > 0 ? .024 : -.019, 'furniture');
+});
 prism('Butt plate', 'rifle', C.furniture, [[-.234, .04], [-.247, .044], [-.247, -.078], [-.234, -.08]], -.022 * W, .022 * W, 'furniture');
 prism('Butt pad', 'rifle', C.rubber, [[-.247, .044], [-.255, .042], [-.256, -.076], [-.247, -.078]], -.022 * W, .022 * W);
 box('Stock lever', 'rifle', C.metal, [0, -.016, -.13], [.012, .008, .04]);
-box('Sling slot', 'rifle', C.port, [0, -.055, -.222], [.0135 * W * 2 + .001, .012, .006]);
+group('Butt pad tread', () => { for (let i = 0; i < 10; i++) box('Tread', 'rifle', C.rubber, [0, -.065 + i * .01, -.255], [.04, .003, .002]); });
 
 // Delta ring, ribbed M4 handguard with heat-shield vents.
 loft('Delta ring', 'rifle', C.metal, [[0, bore, .178, .032, .032], [0, bore, .192, .034, .034], [0, bore, .198, .03, .03]], 14);
-const guard = [];
-for (let i = 0; i <= 10; i++) { const z = .198 + i * .0165, r = (i % 2 ? .0295 : .0315) * 1.02; guard.push([0, bore, z, r * W, r]); }
-guard.push([0, bore, .372, .027 * W, .027]);
-loft('Handguard', 'rifle', C.furniture, guard, 16, 'furniture', Math.PI / 16);
-for (const side of [-1, 1]) for (let i = 0; i < 5; i++) for (const dy of [-.009, .007])
-  box('Vent', 'rifle', C.port, [side * .032 * W, bore + dy, .22 + i * .03], [.004, .005, .012]);
+// Four perforated walls and four Picatinny rails, with geometry through every vent.
+loft('Covered barrel', 'rifle', C.metal, [[0, bore, .195, .0105, .0105], [0, bore, .374, .0105, .0105]], 12);
+for (let face = 0; face < 4; face++) {
+  const angle = face * Math.PI / 2;
+  rotateBore(group('Handguard vent wall', () => {
+    for (let i = 0; i < 8; i++) frame('Vent frame', 'rifle', C.furniture,
+      rounded(.2085 + i * .021, bore, .021, .050, .001),
+      rounded(.2085 + i * .021, bore + .015, .015, .010, .004), .023, .026, 'furniture');
+  }), angle);
+  rotateBore(group('Handguard rail', () => {
+    box('Rail spine', 'rifle', C.rail, [.028, bore, .282], [.005, .019, .168]);
+    for (let i = 0; i < 16; i++) box('Rail tooth', 'rifle', C.rail, [.032, bore, .203 + i * .0104], [.006, .024, .0052]);
+  }), angle);
+}
+pipe('Handguard front cap', 'rifle', C.metal, [[0, bore, .366, .032, .016], [0, bore, .374, .032, .016]], 16);
 // Barrel, A-frame front sight base, A2 birdcage.
 loft('Barrel', 'rifle', C.metal, [[0, bore, .37, .0105, .0105], [0, bore, .45, .0105, .0105], [0, bore, .455, .0092, .0092], [0, bore, .548, .0092, .0092]], 10);
 loft('Front sight collar', 'rifle', C.metal, [[0, bore, .372, .0165, .0165], [0, bore, .404, .0165, .0165]], 10);
-prism('Front sight A-frame', 'rifle', C.metal, [[.374, bore + .01], [.402, bore + .01], [.394, bore + .05], [.392, bore + .058], [.384, bore + .058], [.382, bore + .05]], -.005, .005);
+frame('Front sight A-frame', 'rifle', C.metal,
+  [[.374, bore + .01], [.402, bore + .01], [.392, bore + .058], [.384, bore + .058]],
+  [[.381, bore + .018], [.395, bore + .018], [.3895, bore + .048], [.3865, bore + .048]], -.005, .005);
 for (const side of [-1, 1]) prism('Sight ear', 'rifle', C.metal, [[.382, bore + .045], [.394, bore + .045], [.393, bore + .07], [.383, bore + .07]], side > 0 ? .0045 : -.0075, side > 0 ? .0075 : -.0045);
 box('Front post', 'rifle', C.metal, [0, bore + .064, .388], [.003, .014, .003]);
 prism('Bayonet lug', 'rifle', C.metal, [[.378, bore - .012], [.398, bore - .012], [.398, bore - .024], [.382, bore - .024]], -.004, .004);
-loft('Flash hider', 'rifle', C.metal, [[0, bore, .546, .0118, .0118], [0, bore, .598, .0118, .0118], [0, bore, .602, .0105, .0105]], 12);
-for (let i = 0; i < 4; i++) { const a = Math.PI / 2 + (i - 1.5) * .6; box('Hider slot', 'rifle', C.port, [Math.cos(a) * .0114, bore + Math.sin(a) * .0114, .574], [.0045, .0045, .03]); }
+pipe('Flash hider rear collar', 'rifle', C.metal, [[0, bore, .546, .012, .006], [0, bore, .558, .012, .006]], 16);
+pipe('Flash hider muzzle ring', 'rifle', C.metal, [[0, bore, .594, .012, .008], [0, bore, .602, .011, .008]], 16);
+group('Flash hider cage', () => {
+  for (let i = 0; i < 6; i++) rotateBore(box('Cage strut', 'rifle', C.metal, [.010, bore, .576], [.003, .006, .036]), i * Math.PI / 3);
+});
 
 // STANAG 30-round magazine with forward curve (own bone for reload animation).
 const back = [], front = [];
-for (let i = 0; i <= 8; i++) { const t = i / 8, y = -.012 - .172 * t, bend = .048 * Math.pow(t, 1.7); back.push([-.034 + bend, y]); front.push([.034 + bend, y]); }
+for (let i = 0; i <= 8; i++) { const t = i / 8, y = -.012 - .144 * t, bend = .032 * Math.pow(t, 1.7); back.push([-.034 + bend, y]); front.push([.034 + bend, y]); }
 prism('Magazine', 'mag', C.mag, [...back, ...front.reverse()], -.0125 * W, .0125 * W, 'mag');
-for (let i = 1; i < 7; i++) { const t = i / 8, y = -.012 - .172 * t, bend = .048 * Math.pow(t, 1.7); box('Mag rib', 'mag', C.mag, [0, y, bend], [.0125 * W * 2 + .002, .004, .05], 'mag'); }
-prism('Floor plate', 'mag', C.metal, [[.01, -.18], [.087, -.18], [.087, -.192], [.01, -.192]], -.0145 * W, .0145 * W, 'mag');
+for (const side of [-1, 1]) group('Magazine longitudinal ribs', () => {
+  for (const offset of [-.022, 0, .022]) {
+    const left = [], right = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = .12 + i * .105, y = -.012 - .144 * t, z = offset + .032 * Math.pow(t, 1.7);
+      left.push([z - .0015, y]); right.push([z + .0015, y]);
+    }
+    prism('Pressed rib', 'mag', C.mag, [...left, ...right.reverse()], side > 0 ? .0132 : -.0147, side > 0 ? .0147 : -.0132, 'mag');
+  }
+});
+prism('Floor plate', 'mag', C.metal, [[-.007, -.153], [.071, -.153], [.071, -.16], [-.007, -.16]], -.0145 * W, .0145 * W, 'mag');
+// Shallow grip checkering geometry is visible from both side views.
+for (const side of [-1, 1]) group('Grip checkering', () => {
+  for (let row = 0; row < 9; row++) for (let col = 0; col < 4; col++) {
+    const y = -.068 - row * .005, z = -.003 - row * .0018 + col * .004;
+    box('Grip stipple', 'rifle', C.furniture, [side * .0148, y, z], [.0014, .002, .002], 'furniture');
+  }
+});
 
 // Interchangeable optics (0.15.0). One role is visible at a time; M4Model.SetScope picks it.
 // Sight points used for aligned ADS live in M4/M4Scopes.cs (SightY / SightZ) and must match these.

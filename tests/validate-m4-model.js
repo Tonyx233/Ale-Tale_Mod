@@ -29,8 +29,13 @@ for (const p of model.parts) {
   const n = p.vertices.length / 3, V = i => [p.vertices[i * 3], p.vertices[i * 3 + 1], p.vertices[i * 3 + 2]];
   const origin = bones.get(p.bone);
   let volume = 0;
+  const edges = new Map();
   for (let t = 0; t < p.triangles.length; t += 3) {
     const [a, b, c] = [p.triangles[t], p.triangles[t + 1], p.triangles[t + 2]];
+    for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+      const key = Math.min(u, v) + ':' + Math.max(u, v), e = edges.get(key) || [0, 0];
+      e[0]++; e[1] += u < v ? 1 : -1; edges.set(key, e);
+    }
     check(a < n && b < n && c < n && a >= 0 && b >= 0 && c >= 0, 'index range ' + p.name);
     const A = V(a), B = V(b), C = V(c), area = Math.hypot(...cross(sub(B, A), sub(C, A))) / 2;
     check(area > 1e-10, 'non-degenerate triangle ' + p.name);
@@ -40,18 +45,39 @@ for (const p of model.parts) {
   }
   // Closed, outward-wound (right-hand) surfaces have positive signed volume; Unity reads them as front faces.
   check(volume > 0, 'outward winding / closed surface ' + p.name + ' volume=' + volume);
+  check([...edges.values()].every(([count, balance]) => count === 2 && balance === 0), 'closed consistently wound topology ' + p.name);
 }
 const length = hi[2] - lo[2];
 check(length > .84 && length < .88, 'overall length ' + length.toFixed(3) + ' m (real M4 0.838 m extended)');
 check(Math.abs(lo[2] + .256) < .002, 'butt at z=-0.256 matches M4Model.ModelButt');
 check(Math.abs(hi[2] - .602) < .002, 'flash hider at z=0.602 (muzzle node at 0.612)');
 check(hi[1] - lo[1] > .3 && hi[1] - lo[1] < .38, 'height incl. tallest optic and magazine');
-check(tris < 6000, 'triangle budget ' + tris + ' (one optic visible at a time)');
+check(tris < 10000, 'triangle budget ' + tris + ' (perforated handguard and stock; one optic visible at a time)');
+check(model.parts.length < 150, 'repeated details combined to limit renderer count');
 check(model.parts.filter(p => p.bone === 'mag').length >= 3, 'magazine parts animate with the mag bone');
 check(model.parts.some(p => p.name === 'Selector lever' && p.bone === 'selector'), 'selector lever rotates with fire mode');
 
 // Interchangeable optics: every role exists, and ADS sight points in M4Scopes.cs match the geometry.
 const part = name => model.parts.find(p => p.name === name);
+// Project the mesh along X: rays through authored openings must miss both side faces.
+function sideRayHits(p, z, y) {
+  for (let i = 0; i < p.triangles.length; i += 3) {
+    const v = p.triangles.slice(i, i + 3).map(j => [p.vertices[j * 3 + 2], p.vertices[j * 3 + 1]]);
+    const [a, b, c] = v;
+    const den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+    if (Math.abs(den) < 1e-12) continue;
+    const u = ((b[1] - c[1]) * (z - c[0]) + (c[0] - b[0]) * (y - c[1])) / den;
+    const w = ((c[1] - a[1]) * (z - c[0]) + (a[0] - c[0]) * (y - c[1])) / den;
+    if (u >= -1e-8 && w >= -1e-8 && u + w <= 1 + 1e-8) return true;
+  }
+  return false;
+}
+for (const [name, z, y] of [['Handguard vent wall', .2085, .035], ['Stock skeleton', -.205, -.025], ['Front sight A-frame', .388, .05]]) {
+  check(!!part(name), 'reference detail exists ' + name);
+  check(!sideRayHits(part(name), z, y), 'actual opening through ' + name);
+}
+check(sideRayHits(part('Handguard vent wall'), .2085, .01), 'vent wall retains solid material beside opening');
+check(model.parts.filter(p => p.name === 'Handguard vent wall').every(p => p.role === 'furniture'), 'FDE handguard colour remains supported');
 const bounds = p => { const v = p.vertices, b = [[1e9, -1e9], [1e9, -1e9], [1e9, -1e9]]; for (let i = 0; i < v.length; i++) { const k = i % 3; b[k][0] = Math.min(b[k][0], v[i]); b[k][1] = Math.max(b[k][1], v[i]); } return b; };
 for (const role of [...optics, 'iron-up', 'iron-down']) check(model.parts.some(p => p.role === role), 'optic role present ' + role);
 const scopes = fs.readFileSync(path.join(root, 'M4', 'M4Scopes.cs'), 'utf8');

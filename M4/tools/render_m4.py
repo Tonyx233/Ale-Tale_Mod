@@ -135,7 +135,7 @@ def sheet(out):
     y = 1200
     d.line((px(.602), y, px(-.256), y), fill=ink, width=3)
     for z in (.602, -.256): d.line((px(z), y - 12, px(z), y + 12), fill=ink, width=3)
-    d.text((px(.17) - 180, y + 12), '全長 0.84 m（槍托拉出）· 槍管 368 mm', font=f_small, fill=ink)
+    d.text((px(.17) - 180, y + 12), '模型全長 0.858 m · 四面導軌護木', font=f_small, fill=ink)
     d.text((80, 800), '右側 · 拋殼口 / 前推輔助 / 導氣管', font=f_lab, fill=ink)
 
     # Right column: first-person mockup and FDE colourway.
@@ -149,7 +149,7 @@ def sheet(out):
     pd.ellipse((345, 230, 355, 240), outline=(255, 255, 255, 200), width=2)
     bg.alpha_composite(panel, (1250, 170))
     d.rectangle((1250, 170, 1950, 640), outline=ink, width=3)
-    d.text((1262, 648), '第一人稱持槍示意（手部沿用原生火槍動畫骨架）', font=f_small, fill=ink)
+    d.text((1262, 648), '第一人稱持槍示意（離線模型預覽）', font=f_small, fill=ink)
 
     fde = render((700, 360), centre + np.array([.95, .42, -.62]), centre, 700, colorway=FDE)
     shadow(bg, (1330, 1040, 1880, 1080), 70)
@@ -203,7 +203,8 @@ def scope_sheet(out):
     centre = np.array([0, .03, .17])
     for i, sc in enumerate(SCOPES):
         x, y = 30 + (i % 2) * 885, 120 + (i // 2) * 350
-        img = render((860, 320), centre + np.array([2.0, .25, .0]), centre, 1150, scope=sc)
+        target = centre + np.array([0, -.07, 0])
+        img = render((860, 320), target + np.array([2.0, .15, .0]), target, 940, scope=sc)
         bg.alpha_composite(img, (x, y + 10))
         d.text((x + 30, y), SCOPE_NAMES[sc], font=f_lab, fill=ink)
     bg.convert('RGB').save(out, quality=92)
@@ -226,6 +227,32 @@ def ads_views(out):
     sheet = Image.new('RGBA', (600 * len(tiles), 600)); [sheet.alpha_composite(t, (i * 600, 0)) for i, t in enumerate(tiles)]
     sheet.convert('RGB').save(out, quality=92)
 
+def review_sheet(out):
+    """Reference-oriented views of the actual model data, including opposite sides."""
+    bg = Image.new('RGBA', (1800, 1360), (31, 37, 43, 255))
+    d = ImageDraw.Draw(bg)
+    title = ImageFont.truetype(FONT_B, 46)
+    label = ImageFont.truetype(FONT, 23)
+    d.text((40, 25), 'M4A1 · 模型修改預覽', font=title, fill=(230, 233, 236))
+    tris = sum(len(p['triangles']) // 3 for p in model['parts'])
+    d.text((42, 85), f'實際 mesh 離線渲染 · {len(model["parts"])} 部件 / {tris:,} 三角面 · 紅點配置 · 非遊戲截圖', font=label, fill=(174, 192, 201))
+    target = np.array([0, -.045, .173])
+    views = [
+        ('右側 · 拋殼口', (20, 135), (870, 350), target, [2, 0, 0], 940),
+        ('左側 · 選擇鈕', (910, 135), (870, 350), target, [-2, 0, 0], 940),
+        ('斜前 · 四面導軌與開槽槍口', (20, 505), (870, 400), target, [.9, .38, .65], 900),
+        ('斜後 · 伸縮槍托與機匣', (910, 505), (870, 400), target, [-.9, .38, -.65], 900),
+        ('護木 / A 型準星 / 鏤空槍口', (20, 925), (570, 410), np.array([0, .035, .416]), [.9, .4, .75], 1750),
+        ('機匣 / 直向壓筋彈匣', (610, 925), (570, 410), np.array([0, -.02, .082]), [1, .25, .2], 1850),
+        ('鏤空槍托 / 握把', (1200, 925), (580, 410), np.array([0, -.015, -.17]), [-1, .22, -.4], 1800),
+    ]
+    for text, (x, y), size, centre, delta, scale in views:
+        img = render(size, centre + np.array(delta), centre, scale, scope='reddot', gain=1.8)
+        bg.alpha_composite(img, (x, y))
+        d.rectangle((x, y, x + size[0], y + size[1]), outline=(76, 88, 97), width=1)
+        d.text((x + 15, y + 10), text, font=label, fill=(225, 230, 233))
+    bg.convert('RGB').save(out, quality=95)
+
 def scope_icons():
     load('model.json')
     for sc in SCOPES[1:]:
@@ -237,7 +264,8 @@ def scope_icons():
 
 if __name__ == '__main__':
     what = sys.argv[1] if len(sys.argv) > 1 else 'sheet'
-    if what == 'sheet': sheet(HERE / 'm4-concept.png')
+    if what == 'sheet': sheet(ASSETS / 'm4-concept.jpg')
+    elif what == 'review': review_sheet(ASSETS / 'model-review.jpg')
     elif what == 'icons': icons(); scope_icons()
     elif what == 'scopes': scope_sheet(HERE.parent / 'Assets' / 'm4-scopes.jpg')
     elif what == 'ads': ads_views(HERE.parent / 'Assets' / 'm4-ads.jpg')
