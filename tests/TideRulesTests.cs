@@ -17,16 +17,14 @@ internal static class TideRulesTests
         Check(!TideRules.CanUse(true,true,true,47940,1,.99), "duplicate use throttled");
         Check(!TideRules.CanUse(true,true,true,47940,1,Double.NaN), "bad time rejected");
         Check(!TideRules.CanUse(true,true,true,47940,1,Double.PositiveInfinity), "infinite time rejected");
-        // Tony's 0.16.2 tuning: 1000 HP, movement +50%, windups halved, hit ranges doubled.
+        // Tony's 0.16.3 tuning: 1000 HP, movement x1.5 twice (search excluded), original windups, custom reaches.
         Check(TideRules.Health == 1000, "health 1000");
-        Check(Near(TideRules.Speed,2.1*1.5) && Near(TideRules.Acceleration,7*1.5) && Near(TideRules.TurnSpeed,160*1.5), "movement +50%");
-        Check(Near(TideRules.StopDistance,1.65*1.5) && Near(TideRules.EngageDistance,2.15*1.5) && Near(TideRules.SweepDistance,1.45*1.5), "engage distances +50%");
-        Check(Near(TideRules.SearchRadius,30*1.5) && Near(TideRules.SearchHeight,4*1.5), "search +50%");
-        Check(Near(TideRules.Windup(TideRules.Bite),.35) && Near(TideRules.Windup(TideRules.Sweep),.5) && Near(TideRules.Windup(TideRules.Wave),.8), "windups halved");
-        Check(Near(TideRules.Duration(TideRules.Bite)-TideRules.Windup(TideRules.Bite),1.7-.7) &&
-              Near(TideRules.Duration(TideRules.Sweep)-TideRules.Windup(TideRules.Sweep),2.35-1) &&
-              Near(TideRules.Duration(TideRules.Wave)-TideRules.Windup(TideRules.Wave),3.4-1.6), "strike and recovery unchanged");
-        Check(Near(TideRules.BiteReach,2.3*2) && Near(TideRules.BiteHalfWidth,.65*2) && Near(TideRules.SweepRadius,2.6*2) && Near(TideRules.WaveRadius,4*2), "ranges doubled");
+        Check(Near(TideRules.Speed,2.1*2.25) && Near(TideRules.Acceleration,7*2.25) && Near(TideRules.TurnSpeed,160*2.25), "movement x2.25");
+        Check(Near(TideRules.StopDistance,1.65*2.25) && Near(TideRules.EngageDistance,2.15*2.25) && Near(TideRules.SweepDistance,1.45*2.25), "engage distances x2.25");
+        Check(Near(TideRules.SearchRadius,30) && Near(TideRules.SearchHeight,4) && Near(TideRules.RepathInterval,.15), "original search, 0.15 s repath");
+        Check(Near(TideRules.Windup(TideRules.Bite),.7) && Near(TideRules.Windup(TideRules.Sweep),1) && Near(TideRules.Windup(TideRules.Wave),1.6), "original windups");
+        Check(Near(TideRules.Duration(TideRules.Bite),1.7) && Near(TideRules.Duration(TideRules.Sweep),2.35) && Near(TideRules.Duration(TideRules.Wave),3.4), "original durations");
+        Check(Near(TideRules.BiteReach,6) && Near(TideRules.BiteHalfWidth,1.3) && Near(TideRules.SweepRadius,3.5) && Near(TideRules.WaveRadius,6), "bite 6 m, sweep 3.5 m, wave 6 m");
         // The idol must be inside its own attack range before it stops walking.
         Check(TideRules.StopDistance < TideRules.EngageDistance && TideRules.SweepDistance < TideRules.EngageDistance, "stops inside engage distance");
         Check(TideRules.EngageDistance <= TideRules.BiteReach && TideRules.SweepDistance <= TideRules.SweepRadius, "engaged targets are reachable");
@@ -34,8 +32,8 @@ internal static class TideRulesTests
         Check(TideRules.InHit(TideRules.Bite,0,4,0), "bite ahead");
         Check(!TideRules.InHit(TideRules.Bite,1.4f,2,0), "side dodge");
         Check(!TideRules.InHit(TideRules.Bite,0,-1,0), "bite cannot hit behind");
-        Check(!TideRules.InHit(TideRules.Bite,0,4.8f,0), "bite range");
-        Check(TideRules.InHit(TideRules.Wave,0,-7,0), "wave hits behind");
+        Check(TideRules.InHit(TideRules.Bite,0,5.9f,0) && !TideRules.InHit(TideRules.Bite,0,6.2f,0), "bite range");
+        Check(TideRules.InHit(TideRules.Wave,0,-5.5f,0), "wave hits behind");
         Check(!TideRules.InHit(TideRules.Wave,6,6,0), "outside circle safe");
         Check(!TideRules.InHit(TideRules.Wave,0,0,2), "different floor safe");
         Check(!TideRules.InHit(TideRules.Wave,Single.NaN,0,0), "bad coordinates rejected");
@@ -44,11 +42,11 @@ internal static class TideRulesTests
         {
             double radians=degrees*Math.PI/180;
             float x=(float)Math.Sin(radians),z=(float)Math.Cos(radians);
-            foreach(float r in new[]{1f,5f})
+            foreach(float r in new[]{1f,3.3f})
                 if(Math.Abs(degrees)!=60) Check(TideRules.InHit(TideRules.Sweep,x*r,z*r,0)==(Math.Abs(degrees)<60), "sweep fan "+degrees+"@"+r);
-            Check(!TideRules.InHit(TideRules.Sweep,x*5.4f,z*5.4f,0), "sweep outer edge "+degrees);
-            Check(TideRules.InHit(TideRules.Wave,x*7.9f,z*7.9f,0), "wave inner ring "+degrees);
-            Check(!TideRules.InHit(TideRules.Wave,x*8.2f,z*8.2f,0), "wave outer ring "+degrees);
+            Check(!TideRules.InHit(TideRules.Sweep,x*3.7f,z*3.7f,0), "sweep outer edge "+degrees);
+            Check(TideRules.InHit(TideRules.Wave,x*5.9f,z*5.9f,0), "wave inner ring "+degrees);
+            Check(!TideRules.InHit(TideRules.Wave,x*6.2f,z*6.2f,0), "wave outer ring "+degrees);
         }
         foreach(byte action in new[]{TideRules.Bite,TideRules.Sweep,TideRules.Wave})
         {

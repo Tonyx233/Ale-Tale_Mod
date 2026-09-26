@@ -10,23 +10,23 @@ namespace TonyMods
         internal const int Price = 1, Health = 1000;
         internal const float Flight = .65f, Rise = 1.5f, Radius = .48f;
         // Movement (NavMeshAgent), host only.
-        internal const float Speed = 3.15f, Acceleration = 10.5f, TurnSpeed = 240, StopDistance = 2.475f;
-        internal const float SearchRadius = 45, SearchHeight = 6, RepathInterval = .3f;
+        internal const float Speed = 4.725f, Acceleration = 15.75f, TurnSpeed = 360, StopDistance = 3.7125f;
+        internal const float SearchRadius = 30, SearchHeight = 4, RepathInterval = .15f;
         // Attack when the target is within EngageDistance; sweep when closer than SweepDistance, else bite.
-        internal const float EngageDistance = 3.225f, SweepDistance = 2.175f;
+        internal const float EngageDistance = 4.8375f, SweepDistance = 3.2625f;
         internal const float FirstWaveDelay = 6, WaveCooldown = 10;
         // Hit shapes in the idol's local space (metres). HitHeight keeps other floors safe.
-        internal const float BiteReach = 4.6f, BiteHalfWidth = 1.3f, BiteBack = .3f, SweepRadius = 5.2f, WaveRadius = 8, HitHeight = 1.8f;
+        internal const float BiteReach = 6, BiteHalfWidth = 1.3f, BiteBack = .3f, SweepRadius = 3.5f, WaveRadius = 6, HitHeight = 1.8f;
         internal const byte Summon = 0, Walk = 1, Bite = 2, Sweep = 3, Wave = 4, Death = 5;
-        internal static float Windup(byte action) { return action == Bite ? .35f : action == Sweep ? .5f : action == Wave ? .8f : 0; }
+        internal static float Windup(byte action) { return action == Bite ? .7f : action == Sweep ? 1 : action == Wave ? 1.6f : 0; }
         internal static float Strike(byte action) { return action == Bite ? .2f : action == Sweep ? .35f : action == Wave ? .4f : 0; }
-        // Windup + strike + recovery; recovery unchanged (Bite .8, Sweep 1.0, Wave 1.4).
+        // Windup + strike + recovery (Bite .8, Sweep 1.0, Wave 1.4).
         internal static float Duration(byte action)
-        { return action == Summon ? Flight + Rise : action == Bite ? 1.35f : action == Sweep ? 1.85f : action == Wave ? 2.6f : action == Death ? 1.4f : 0; }
+        { return action == Summon ? Flight + Rise : action == Bite ? 1.7f : action == Sweep ? 2.35f : action == Wave ? 3.4f : action == Death ? 1.4f : 0; }
         internal static short Damage(byte action) { return (short)(action == Bite ? 12 : action == Sweep ? 16 : 20); }
         // PlayerNet.HitClientRpc drops the hit when the owner's 3D distance exceeds this, so it must cover
         // every InHit point (box corners and the height allowance) plus a little movement latency.
-        internal static float Range(byte action) { return action == Bite ? 5.4f : action == Sweep ? 5.8f : 8.5f; }
+        internal static float Range(byte action) { return action == Bite ? 6.7f : action == Sweep ? 4.2f : 6.5f; }
         // Preferred throw distance first, then closer/farther fallbacks for cluttered interiors.
         internal static readonly float[] ThrowDistances = { 5, 4, 3, 6 };
         internal static bool Finite(double value) { return !Double.IsNaN(value) && !Double.IsInfinity(value); }
