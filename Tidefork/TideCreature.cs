@@ -16,8 +16,10 @@ namespace TonyMods
         private NavMeshAgent agent;
         private CapsuleCollider hitbox;
         private TideModel model;
-        private bool server, hit, hidden, shotArmed, stranded;
+        private bool server, hit, hidden, stranded;
         private double nextWave, nextPath, nextShot, nextShotPlan;
+        // Host: shells of the current volley aimed so far, and a bitmask of the ones already resolved.
+        private int planned, splashed;
         private double previousAge;
         private double lastHostClock;
         private ushort previousHp;
@@ -107,8 +109,8 @@ namespace TonyMods
             float age = (float)(TideSummons.Now - State.started);
             hitbox.enabled = State.action != TideRules.Summon && State.action != TideRules.Death;
             model.Animate(State.action, age, speed, hitFlash, TideSummons.Arc(State.from, State.landing + Vector3.up * .16f, Mathf.Clamp01(age / TideRules.Flight)));
-            // The shell runs on its own clock, independent of the idol's current action.
-            model.Shell(State.shotAt > 0 ? (float)(TideSummons.Now - State.shotAt) : float.NaN, State.shotFrom, State.shotTo, State.shotFlight, State.shotApex);
+            // Shells run on their own clocks, independent of the idol's current action.
+            model.Volley(State.shotAt > 0 ? (float)(TideSummons.Now - State.shotAt) : float.NaN, State.shotFrom, State.shotTo, State.shotApex);
         }
         private void Tick()
         {
@@ -118,7 +120,7 @@ namespace TonyMods
             lastHostClock = now;
             if (paused > 0)
             {
-                // Preserve the telegraph, a shell in the air and the cooldowns across a paused solo game.
+                // Preserve the telegraph, shells in the air and the cooldowns across a paused solo game.
                 State.started += paused; State.born += paused; nextWave += paused; nextPath += paused;
                 nextShot += paused; nextShotPlan += paused; if (State.shotAt > 0) State.shotAt += paused;
                 return;
@@ -131,8 +133,7 @@ namespace TonyMods
                 if (now - State.started >= TideRules.Duration(TideRules.Death)) owner.Remove(this);
                 return;
             }
-            // The shell lands whatever the idol is doing by then (walking, biting, sweeping).
-            if (shotArmed && TideRules.ShotDue(now, State.shotAt, State.shotFlight)) { shotArmed = false; Splash(); }
+            Land(now);
             if (State.action == TideRules.Summon)
             {
                 Stop();
@@ -149,8 +150,12 @@ namespace TonyMods
             }
             if (State.action == TideRules.Shot)
             {
-                // Stands still for the windup and throw only; the chase resumes while the shell is in the air.
+                // Stands still for the whole volley; the chase resumes after the last throw while shells still fly.
                 Stop();
+                PlayerNet aim = Nearest();
+                if (aim != null) Track(aim, now);
+                // A long frame stall can make several shells due at once; aim them all so the volley stays at five.
+                while (planned < TideRules.ShotCount && elapsed >= TideRules.PlanAt(planned)) Plan(aim, now);
                 if (elapsed >= TideRules.Duration(TideRules.Shot)) Enter(TideRules.Walk);
                 return;
             }
@@ -187,42 +192,86 @@ namespace TonyMods
         private void Enter(byte action)
         {
             State.action = action; State.started = TideSummons.Now; hit = false; previousAge = 0;
-            // Dead idols stop attacking, including a shell still in the air.
-            if (action == TideRules.Death) { shotArmed = false; State.shotAt = 0; }
+            // Dead idols stop attacking, including shells still in the air and the rest of the volley.
+            if (action == TideRules.Death) { State.shotAt = 0; State.shotTo = null; State.shotApex = null; planned = splashed = 0; }
             if (action != TideRules.Walk) Stop();
             owner.Changed();
         }
-        private static float Flat(Vector3 offset) { offset.y = 0; return offset.magnitude; }
-        // 潮彈: the landing point (half lead on the target's run) and the highest clear arc are fixed before the
-        // windup, so every client draws the same ring and flight from one snapshot.
+        // 潮彈 volley: aims the first shell and starts the windup. Every shell is fixed when it is aimed and written
+        // to the snapshot, so all clients draw the same rings and flights.
         private bool Fire(PlayerNet target, Vector3 delta, double now)
         {
-            if (shotArmed) return false;
-            Quaternion facing = delta.sqrMagnitude > .0001f ? Quaternion.LookRotation(delta) : transform.rotation;
-            Vector3 from = transform.position + facing * new Vector3(0, TideRules.MuzzleHeight, TideRules.MuzzleForward);
-            // The shell forms above the crown: a ceiling right over the head rules the throw out.
+            if (Unlanded()) return false;
+            Vector3 from = transform.position + Vector3.up * TideRules.MuzzleHeight;
+            // The shells form above the crown: a ceiling right over the head rules the volley out.
             if (Blocked(transform.position + Vector3.up * 1.6f, from)) return false;
+            Vector3 to; float apex;
+            if (!Aim(target, from, TideRules.Release(0), stranded, out to, out apex)) return false;
+            // Plant the feet now: braking at full chase speed would slide the crown ~0.7 m off the gathering shell.
+            if (agent.enabled && agent.isOnNavMesh) agent.velocity = Vector3.zero;
+            if (delta.sqrMagnitude > .0001f) transform.rotation = Quaternion.LookRotation(delta);
+            // The cooldown starts once the last shell is thrown.
+            nextShot = now + TideRules.Release(TideRules.ShotCount - 1) + TideRules.ShotCooldown;
+            State.shotFrom = from; State.shotTo = new[] { to }; State.shotApex = new[] { apex };
+            State.shotAt = now + TideRules.Release(0);
+            planned = 1; splashed = 0;
+            Enter(TideRules.Shot);
+            return true;
+        }
+        // Aims the next shell of the volley at whoever is nearest now. Later shells finish the volley at any range
+        // up to ShotMax; with no target or no clear arc the shell is skipped (apex 0) and the volley goes on.
+        private void Plan(PlayerNet target, double now)
+        {
+            int shell = planned++;
+            Vector3 to = State.shotFrom; float apex = 0;
+            float untilRelease = Mathf.Max(0, (float)(State.shotAt + shell * TideRules.ShotInterval - now));
+            if (target != null && Aim(target, State.shotFrom, untilRelease, true, out to, out apex))
+            {
+                Vector3 delta = target.transform.position - transform.position; delta.y = 0;
+                if (delta.sqrMagnitude > .0001f) transform.rotation = Quaternion.LookRotation(delta);
+            }
+            else { to = State.shotFrom; apex = 0; }
+            State.shotTo = Append(State.shotTo, to); State.shotApex = Append(State.shotApex, apex);
+            owner.Changed();
+        }
+        // Landing point with half lead on the target's run (a lead past a ledge or a wall falls back to the feet),
+        // then the highest clear arc to it.
+        private bool Aim(PlayerNet target, Vector3 from, float untilRelease, bool anyRange, out Vector3 to, out float apex)
+        {
             Vector3 feet = target.transform.position;
-            Vector3 lead = trackedVelocity * TideRules.LeadSeconds(TideRules.ShotFlight(delta.magnitude)); lead.y = 0;
+            Vector3 lead = trackedVelocity * TideRules.LeadSeconds(untilRelease, TideSummons.Flight(from, feet)); lead.y = 0;
             lead = Vector3.ClampMagnitude(lead, TideRules.ShotLeadMax);
             foreach (Vector3 aim in new[] { feet + lead, feet })
-            {
-                Vector3 ground; float apex;
-                if (!Ground(aim, feet.y, out ground)) continue;
-                float distance = Flat(ground - transform.position);
-                if (!TideRules.InShotRange(distance, stranded) || !ClearArc(from, ground, out apex)) continue;
-                // Plant the feet now: braking at full chase speed would slide the crown ~0.7 m off the gathering shell.
-                if (agent.enabled && agent.isOnNavMesh) agent.velocity = Vector3.zero;
-                transform.rotation = facing;
-                nextShot = now + TideRules.ShotCooldown;
-                State.shotFrom = from; State.shotTo = ground; State.shotApex = apex;
-                State.shotFlight = TideRules.ShotFlight(distance);
-                State.shotAt = now + TideRules.Windup(TideRules.Shot);
-                shotArmed = true;
-                Enter(TideRules.Shot);
-                return true;
-            }
+                if (Ground(aim, feet.y, out to) && TideRules.InShotRange(TideSummons.Flat(to - from), anyRange) && ClearArc(from, to, out apex)) return true;
+            to = Vector3.zero; apex = 0;
             return false;
+        }
+        // Shells land on their own clocks, whatever the idol is doing by then (walking, biting, sweeping).
+        private void Land(double now)
+        {
+            if (State.shotAt <= 0 || State.shotTo == null || State.shotApex == null) return;
+            for (int shell = 0; shell < State.shotTo.Length && shell < State.shotApex.Length; shell++)
+            {
+                if ((splashed & (1 << shell)) != 0) continue;
+                if (State.shotApex[shell] > 0 && !TideRules.ShotDue(now, State.shotAt, shell, TideSummons.Flight(State.shotFrom, State.shotTo[shell]))) continue;
+                splashed |= 1 << shell;
+                if (State.shotApex[shell] > 0) Splash(State.shotTo[shell]);
+            }
+        }
+        private bool Unlanded()
+        {
+            if (State.shotAt <= 0 || State.shotTo == null || State.shotApex == null) return false;
+            for (int shell = 0; shell < State.shotTo.Length && shell < State.shotApex.Length; shell++)
+                if (State.shotApex[shell] > 0 && (splashed & (1 << shell)) == 0) return true;
+            return false;
+        }
+        private static T[] Append<T>(T[] items, T item)
+        {
+            int count = items == null ? 0 : items.Length;
+            var grown = new T[count + 1];
+            if (count > 0) Array.Copy(items, grown, count);
+            grown[count] = item;
+            return grown;
         }
         // Ground under the aim point at the target's own level (a lead past a ledge falls back to the feet).
         private bool Ground(Vector3 aim, float level, out Vector3 ground)
@@ -319,10 +368,9 @@ namespace TonyMods
                 player.HitClientRpc(TideRules.Damage(action), transform.position, TideRules.Range(action), true, EffectsController.EffectType.None);
             }
         }
-        private void Splash()
+        private void Splash(Vector3 center)
         {
             if (!server || PlayerManager.Instance == null || vulnerable.hp.Value == 0) return;
-            Vector3 center = State.shotTo;
             foreach (PlayerNet player in PlayerManager.Instance.players.Values)
             {
                 if (player == null || !player.IsSpawned || player.hp.Value <= 0 || player.isDespawning || player.isInvisible.Value) continue;

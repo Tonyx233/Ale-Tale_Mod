@@ -17,10 +17,10 @@ namespace TonyMods
         private LineRenderer effect, warning;
         private Material glow, water;
         private readonly List<Transform> droplets = new List<Transform>();
-        // 潮彈 visuals are placed in world space: the idol walks on while its shell is still in the air.
-        private Transform shell;
-        private LineRenderer shellTrail, shellMark, shellTimer, shellBurst;
-        private readonly List<Transform> spray = new List<Transform>();
+        // 潮彈 visuals are placed in world space: the idol walks on while its shells are still in the air.
+        private sealed class ShellFx { public Transform orb; public LineRenderer trail, mark, timer, burst; public Transform[] spray; }
+        private readonly ShellFx[] shells = new ShellFx[TideRules.ShotCount];
+        private bool shellsShown;
         private float gait;
         internal static TideModel Create(Transform parent)
         {
@@ -80,11 +80,15 @@ namespace TonyMods
             water.SetColor("_Color", new Color(.25f, .78f, .9f)); water.SetColor("_BaseColor", new Color(.25f, .78f, .9f));
             water.SetFloat("_Metallic", 0); water.SetFloat("_Smoothness", .85f);
             water.EnableKeyword("_EMISSION"); water.SetColor("_EmissionColor", new Color(.1f, .75f, .9f) * 1.3f);
-            shell = Drop("Tidefork shell", water, .36f);
-            shellTrail = MakeLine("Tidefork shell trail", .12f, true); shellTrail.endWidth = .02f; shellTrail.endColor = new Color(.12f, .86f, .95f, 0);
-            shellMark = MakeLine("Tidefork shell landing", .03f, true); shellTimer = MakeLine("Tidefork shell timer", .05f, true);
-            shellBurst = MakeLine("Tidefork shell splash", .07f, true);
-            for (int i = 0; i < 10; i++) spray.Add(Drop("Tidefork shell spray " + i, water, .06f));
+            for (int k = 0; k < shells.Length; k++)
+            {
+                var fx = new ShellFx { orb = Drop("Tidefork shell " + k, water, .36f), spray = new Transform[6] };
+                fx.trail = MakeLine("Tidefork shell trail " + k, .12f, true); fx.trail.endWidth = .02f; fx.trail.endColor = new Color(.12f, .86f, .95f, 0);
+                fx.mark = MakeLine("Tidefork shell landing " + k, .03f, true); fx.timer = MakeLine("Tidefork shell timer " + k, .05f, true);
+                fx.burst = MakeLine("Tidefork shell splash " + k, .07f, true);
+                for (int i = 0; i < fx.spray.Length; i++) fx.spray[i] = Drop("Tidefork shell spray " + k + "." + i, water, .06f);
+                shells[k] = fx;
+            }
         }
         private Transform Drop(string name, Material material, float size)
         {
@@ -172,45 +176,69 @@ namespace TonyMods
             }
             else if (action == TideRules.Shot)
             {
-                // Rears back while the shell gathers over the crown, pitches forward on the throw, settles to walk.
-                float strike = TideRules.Strike(action), throwing = Mathf.Clamp01(release / strike);
-                float settle = Mathf.Clamp01((release - strike) / (TideRules.Duration(action) - windup - strike));
-                torso.localRotation = Quaternion.Euler(release < 0 ? -10 * charge : Mathf.Lerp(-10, 8, throwing) * (1 - settle), 0, 0);
-                bones["crown"].localScale = new Vector3(1 + (release < 0 ? charge : 1 - throwing) * .15f, 1, 1);
+                // Rears back while a shell gathers over the crown, pitches forward on each throw, settles after the last.
+                float strike = TideRules.Strike(action), last = TideRules.Release(TideRules.ShotCount - 1), pitch;
+                if (release < 0) pitch = -10 * charge;
+                else if (age >= last + strike) pitch = 8 * (1 - Mathf.Clamp01((age - last - strike) / (TideRules.Duration(action) - last - strike)));
+                else
+                {
+                    int thrown = Mathf.Min(TideRules.ShotCount - 1, (int)(release / TideRules.ShotInterval));
+                    float since = age - TideRules.Release(thrown);
+                    pitch = since < strike ? Mathf.Lerp(-10, 8, since / strike) : Mathf.Lerp(8, -10, (since - strike) / (TideRules.ShotInterval - strike));
+                }
+                torso.localRotation = Quaternion.Euler(pitch, 0, 0);
+                bones["crown"].localScale = new Vector3(1 + Mathf.Clamp01(-pitch / 10) * .15f, 1, 1);
             }
             else if (action == TideRules.Summon && !flight) Ring(effect, .9f * rise, .045f, 0, 360);
             if (dying > 0)
             { bones["crown"].localScale = new Vector3(1 - dying * .7f, 1, 1); materials[3].SetColor("_EmissionColor", Color.black); materials[5].SetColor("_EmissionColor", new Color(1,.5f,.08f) * (1 - dying)); }
         }
-        // since = seconds after release: negative while the shell gathers above the crown, NaN when there is none.
-        internal void Shell(float since, Vector3 from, Vector3 to, float flight, float apex)
+        // since = seconds after the first shell's release (NaN = no volley). Shell k is released ShotInterval after
+        // shell k-1 and gathers above the crown until then; apex 0 marks a skipped shell.
+        internal void Volley(float since, Vector3 from, Vector3[] to, float[] apex)
         {
-            float windup = TideRules.Windup(TideRules.Shot);
-            bool gathering = since >= -windup && since < 0, flying = since >= 0 && since < flight;
+            int count = to == null || apex == null ? 0 : Math.Min(to.Length, apex.Length);
+            bool any = false;
+            for (int k = 0; k < shells.Length; k++)
+            {
+                float local = since - k * TideRules.ShotInterval, gather = k == 0 ? TideRules.Windup(TideRules.Shot) : TideRules.ShotInterval;
+                bool live = k < count && apex[k] > 0;
+                float flight = live ? TideSummons.Flight(from, to[k]) : 0;
+                bool shown = live && local >= -gather && local < flight + TideRules.ShotSplash;
+                // Idle sets are only touched on the frame the volley ends, not every frame.
+                if (shown || shellsShown) Draw(shells[k], shown ? local : float.NaN, gather, from, live ? to[k] : from, flight, live ? apex[k] : 0);
+                any |= shown;
+            }
+            shellsShown = any;
+        }
+        // since = seconds after this shell's release: negative while it gathers above the crown, NaN = hidden.
+        private static void Draw(ShellFx fx, float since, float gather, Vector3 from, Vector3 to, float flight, float apex)
+        {
+            bool gathering = since >= -gather && since < 0, flying = since >= 0 && since < flight;
             bool bursting = since >= flight && since < flight + TideRules.ShotSplash;
-            shell.gameObject.SetActive(gathering || flying);
-            shellTrail.enabled = flying; shellMark.enabled = shellTimer.enabled = gathering || flying; shellBurst.enabled = bursting;
+            fx.orb.gameObject.SetActive(gathering || flying);
+            fx.trail.enabled = flying; fx.mark.enabled = fx.timer.enabled = gathering || flying; fx.burst.enabled = bursting;
             if (gathering || flying)
             {
-                shell.position = flying ? TideSummons.Arc(from, to, since / flight, apex) : from;
-                shell.localScale = Vector3.one * (.36f * Mathf.Clamp01((since + windup) / windup));
+                fx.orb.position = flying ? TideSummons.Arc(from, to, since / flight, apex) : from;
+                fx.orb.localScale = Vector3.one * (.36f * Mathf.Clamp01((since + gather) / gather));
                 // The inner ring reaches the drawn edge exactly when the shell lands.
-                WorldRing(shellMark, to, TideRules.ShotRing);
-                WorldRing(shellTimer, to, TideRules.ShotRing * Mathf.Clamp01((since + windup) / (windup + flight)));
+                WorldRing(fx.mark, to, TideRules.ShotRing);
+                WorldRing(fx.timer, to, TideRules.ShotRing * Mathf.Clamp01((since + gather) / (gather + flight)));
             }
             if (flying)
             {
                 float phase = since / flight;
-                shellTrail.positionCount = 8;
-                for (int i = 0; i < 8; i++) shellTrail.SetPosition(i, TideSummons.Arc(from, to, Mathf.Max(0, phase - i * .03f), apex));
+                fx.trail.positionCount = 8;
+                for (int i = 0; i < 8; i++) fx.trail.SetPosition(i, TideSummons.Arc(from, to, Mathf.Max(0, phase - i * .03f), apex));
             }
             float t = since - flight;
-            if (bursting) WorldRing(shellBurst, to, Mathf.Lerp(.3f, TideRules.ShotRing, Mathf.Clamp01(t / .35f)));
-            for (int i = 0; i < spray.Count; i++)
+            if (bursting) WorldRing(fx.burst, to, Mathf.Lerp(.3f, TideRules.ShotRing, Mathf.Clamp01(t / .35f)));
+            for (int i = 0; i < fx.spray.Length; i++)
             {
-                Transform drop = spray[i]; drop.gameObject.SetActive(bursting);
+                Transform drop = fx.spray[i]; drop.gameObject.SetActive(bursting);
                 if (!bursting) continue;
-                float a = i * 2.39996f, radius = .2f + t * 3.2f;
+                float a = i * 2.39996f, radius = .2f + t * 4.2f;
                 drop.position = to + new Vector3(Mathf.Sin(a) * radius, .1f + t * 3 - t * t * 5, Mathf.Cos(a) * radius);
                 drop.localScale = Vector3.one * (.06f * Mathf.Clamp01(1 - t / TideRules.ShotSplash));
             }
