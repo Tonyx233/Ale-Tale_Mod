@@ -17,7 +17,7 @@ namespace TonyMods
 {
     // M4A1 rifle + 5.56 rounds: item registration, native GunTool patches, visuals on every
     // prefab that shows the item, and a sound relay so teammates hear the synthesized shots.
-    public sealed class M4Armory : MonoBehaviour
+    public sealed partial class M4Armory : MonoBehaviour
     {
         public const ushort RifleId = 47930, AmmoId = 47931, MusketId = 360, BulletId = 290;
         private const string Channel = "Tony.M4.v1";
@@ -75,9 +75,11 @@ namespace TonyMods
             volume = config.Bind("M4", "Volume", .8f, new ConfigDescription("Rifle sound volume, multiplied by the game's sound volume.", new AcceptableValueRange<float>(0f, 1f)));
             modelScale = config.Bind("M4", "ModelScale", .85f, new ConfigDescription("Model size relative to the musket it replaces.", new AcceptableValueRange<float>(.5f, 1.5f)));
             fpOffset = config.Bind("M4", "FirstPersonOffset", "0,0,0", "First-person model nudge in musket mesh units: x (+ towards stock), y (up), z (right).");
+            BindOptics(config);
             M4Audio.Initialize(logger, volume);
             if (!M4Rifle.ApiReady || HandRig == null || TpAnimator == null) throw new MissingMemberException("GunTool / PlayerAnimTP API changed; M4 disabled");
             rifleIcon = LoadIcon("Tony.M4.icon.png"); ammoIcon = LoadIcon("Tony.M4.ammo.png");
+            LoadOpticIcons();
             brass = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
             brass.name = "Tony M4 brass"; brass.hideFlags = HideFlags.DontUnloadUnusedAsset;
             brass.color = new Color(.8f, .6f, .24f);
@@ -97,12 +99,13 @@ namespace TonyMods
                 harmony.Patch(hand, prefix: new HarmonyMethod(typeof(M4Armory), "BeforeHandItem"), postfix: new HarmonyMethod(typeof(M4Armory), "AfterHandItem"));
                 Patch(typeof(CollectibleNet), "OnNetworkSpawn", "AfterCollectibleSpawn", false);
                 Patch(typeof(CollectibleNet), "OnItemValueChanged", "AfterCollectibleItem", false);
+                PatchOptics();
             }
             catch { harmony.UnpatchSelf(); harmony = null; throw; }
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             StartCoroutine(Localize());
             log.LogInfo("M4A1 ready: item " + RifleId + " + 5.56 rounds " + AmmoId + "; " + rpm.Value + " RPM, " + damage.Value + " dmg, " + magazine.Value +
-                "-round magazine, ACOG " + scopePower.Value + "x, " + modeKey.Value + " toggles fire mode.");
+                "-round magazine, ACOG " + scopePower.Value + "x, " + modeKey.Value + " toggles fire mode; optics 47932-47936 (drag onto the rifle, " + detachKey.Value + " removes).");
         }
 
         private void Patch(Type type, string target, string handler, bool prefix)
@@ -156,6 +159,7 @@ namespace TonyMods
                 throw new InvalidOperationException("Native musket / bullet item data missing");
             rifleData = Upsert(items, RifleId, "TonyM4", musket, ConfigureRifle);
             ammoData = Upsert(items, AmmoId, "TonyM556", bullet, ConfigureAmmo);
+            RegisterOptics(items, bullet);
             manager.itemDataHub.itemData = items.ToArray();
         }
 
@@ -204,7 +208,7 @@ namespace TonyMods
             try
             {
                 if (rifle == null) rifle = __instance.gameObject.AddComponent<M4Rifle>();
-                rifle.Bind(__instance);
+                rifle.Bind(__instance, __0);
             }
             catch (Exception ex)
             {
@@ -252,7 +256,7 @@ namespace TonyMods
             if (!Ready || __1 != RifleId || __instance.handItem == null || __instance.handItem == __state) return;
             try
             {
-                M4Model.Skin(__instance.handItem.transform, false, instance.modelScale.Value, Vector3.zero, instance.fde.Value);
+                M4Model.Skin(__instance.handItem.transform, false, instance.modelScale.Value, Vector3.zero, instance.fde.Value, instance.RemoteScope(__instance));
                 HandRig.Invoke(__instance, null);
                 Animator animator = (Animator)TpAnimator.GetValue(__instance);
                 if (animator != null) animator.SetInteger("TorsoState", 3);
@@ -265,7 +269,7 @@ namespace TonyMods
         private static void SkinCollectible(CollectibleNet collectible, Item item)
         {
             if (!Ready || item.dataId != RifleId || collectible == null) return;
-            try { M4Model.Skin(collectible.transform, false, instance.modelScale.Value, Vector3.zero, instance.fde.Value); }
+            try { M4Model.Skin(collectible.transform, false, instance.modelScale.Value, Vector3.zero, instance.fde.Value, M4Scopes.Effective(item.metaInt)); }
             catch (Exception ex) { instance.log.LogError("M4 dropped-item model failed: " + ex); }
         }
 
@@ -312,10 +316,12 @@ namespace TonyMods
             try
             {
                 int length = reader.Length;
-                if (length < 14 || length > 64) return;
+                if (length < 2 || length > 64) return;
                 byte[] data = new byte[length];
                 reader.ReadBytesSafe(ref data, length, 0);
-                if (data[0] != Protocol || !M4Sound.Valid(data[1])) return;
+                if (data[0] != Protocol) return;
+                if (!M4Sound.Valid(data[1])) { ReceiveControl(sender, data); return; }
+                if (length < 14) return;
                 var kind = (M4Sound.Kind)data[1];
                 Vector3 position = new Vector3(BitConverter.ToSingle(data, 2), BitConverter.ToSingle(data, 6), BitConverter.ToSingle(data, 10));
                 if (network.IsServer)
@@ -335,7 +341,7 @@ namespace TonyMods
                     PlayRemote(kind, position, Shooter(id));
                 }
             }
-            catch (Exception ex) { log.LogWarning("M4 sound message rejected: " + ex.Message); }
+            catch (Exception ex) { log.LogWarning("M4 message rejected: " + ex.Message); }
         }
 
         // Host-side flood guard: 30 messages per second per client (750 RPM is 12.5 shots/s).
@@ -382,7 +388,7 @@ namespace TonyMods
         private void Disconnect()
         {
             if (network != null && network.CustomMessagingManager != null) network.CustomMessagingManager.UnregisterNamedMessageHandler(Channel);
-            network = null; budget.Clear(); budgetAt.Clear();
+            network = null; budget.Clear(); budgetAt.Clear(); remoteScopes.Clear(); lastDetach.Clear();
         }
 
         // ---- Localization ---------------------------------------------------------------------
@@ -395,11 +401,13 @@ namespace TonyMods
             chinese = LocalizationSettings.SelectedLocale == null || LocalizationSettings.SelectedLocale.Identifier.Code.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
             string key = modeKey.Value.ToString(), rounds = ammoPerPurchase.Value.ToString();
             SetText(table, "TonyM4Name", chinese ? "M4A1 步槍" : "M4A1 Rifle");
+            string detach = detachKey.Value.ToString();
             SetText(table, "TonyM4Description", chinese
-                ? "全自動卡賓槍，" + magazine.Value + " 發彈匣，附 ACOG " + scopePower.Value + "× 瞄準鏡。按住左鍵連發，R 換彈，" + key + " 切換全自動／半自動，右鍵開鏡。使用 5.56 子彈。"
-                : "Full-auto carbine with a " + magazine.Value + "-round magazine and a " + scopePower.Value + "x ACOG. Hold fire for automatic, R reloads, " + key + " toggles auto/semi, right mouse aims. Uses 5.56 rounds.");
+                ? "全自動卡賓槍，" + magazine.Value + " 發彈匣，出廠附 ACOG " + scopePower.Value + "× 瞄準鏡。按住左鍵連發，R 換彈，" + key + " 切換全自動／半自動，右鍵開鏡。把紅點、全像、黃銅鏡或狙擊鏡拖到槍上即可換鏡，" + detach + " 拆下改用機械瞄具。使用 5.56 子彈。"
+                : "Full-auto carbine with a " + magazine.Value + "-round magazine and a " + scopePower.Value + "x ACOG. Hold fire for automatic, R reloads, " + key + " toggles auto/semi, right mouse aims. Drag a red dot, holographic, brass or sniper optic onto it to swap; " + detach + " removes the optic for iron sights. Uses 5.56 rounds.");
             SetText(table, "TonyM556Name", chinese ? "5.56 子彈" : "5.56 Rounds");
             SetText(table, "TonyM556Description", chinese ? "M4A1 步槍用彈藥。商店每次購買 " + rounds + " 發。" : "Ammunition for the M4A1 rifle. Each merchant purchase gives " + rounds + " rounds.");
+            LocalizeOptics(table);
         }
         private static void SetText(UnityEngine.Localization.Tables.StringTable table, string key, string value)
         { var entry = table.GetEntry(key); if (entry == null) table.AddEntry(key, value); else entry.Value = value; }

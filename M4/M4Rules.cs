@@ -10,7 +10,7 @@ namespace TonyMods
         public const int FlushShots = 6;
         public const float FlushSeconds = .5f;
         // Native spread is spreadAngle / FOV in viewport units, roughly degrees of radius.
-        public const float BaseSpread = .9f, SpreadPerShot = .14f, MaxSpread = 3.2f, ScopedSpread = .35f;
+        public const float BaseSpread = .9f, SpreadPerShot = .14f, MaxSpread = 3.2f;
         public const float HeatHold = .12f, HeatDecay = 7f;
         public const float EmptyExtraReload = .4f;
 
@@ -31,10 +31,10 @@ namespace TonyMods
             return pending > 0 && (pending >= FlushShots || oldestAge >= FlushSeconds || clip <= 0);
         }
 
-        public static float Spread(float heat, bool scoped)
+        // factor: 1 from the hip, M4ScopeProfile.SpreadFactor while aiming.
+        public static float Spread(float heat, float factor)
         {
-            float spread = Math.Min(MaxSpread, BaseSpread + Math.Max(0, heat) * SpreadPerShot);
-            return scoped ? spread * ScopedSpread : spread;
+            return Math.Min(MaxSpread, BaseSpread + Math.Max(0, heat) * SpreadPerShot) * Math.Max(0, Math.Min(1, factor));
         }
 
         public static float CoolHeat(float heat, float dt, float sinceShot)

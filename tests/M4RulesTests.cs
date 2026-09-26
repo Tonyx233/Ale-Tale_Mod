@@ -60,10 +60,10 @@ internal static class M4RulesTests
         Check(batch.Since == 5 && batch.Charge == 2, "Batch age starts at the oldest pending shot");
 
         // Spread bloom: bounded, grows with heat, scoped is tighter, cools after a pause.
-        Check(Near(M4Rules.Spread(0, false), M4Rules.BaseSpread, 1e-6), "First shot uses base spread");
-        Check(M4Rules.Spread(10, false) > M4Rules.Spread(2, false), "Spread grows while firing");
-        Check(Near(M4Rules.Spread(1000, false), M4Rules.MaxSpread, 1e-6), "Spread is capped");
-        Check(M4Rules.Spread(5, true) < M4Rules.Spread(5, false) * .5f, "Scope tightens spread");
+        Check(Near(M4Rules.Spread(0, 1), M4Rules.BaseSpread, 1e-6), "First shot uses base spread");
+        Check(M4Rules.Spread(10, 1) > M4Rules.Spread(2, 1), "Spread grows while firing");
+        Check(Near(M4Rules.Spread(1000, 1), M4Rules.MaxSpread, 1e-6), "Spread is capped");
+        Check(Near(M4Rules.Spread(5, .35f), M4Rules.Spread(5, 1) * .35f, 1e-6) && M4Rules.Spread(5, 3) == M4Rules.Spread(5, 1), "Aim factor scales spread and is clamped");
         Check(M4Rules.CoolHeat(10, .1f, .05f) == 10, "Heat holds between automatic shots");
         Check(M4Rules.CoolHeat(10, .1f, .5f) < 10 && M4Rules.CoolHeat(1, 5, 1) == 0, "Heat decays to zero");
 
@@ -85,8 +85,49 @@ internal static class M4RulesTests
         ScopeCycle musket = new ScopeCycle();
         musket.Advance(); Check(musket.Magnification == 3 && !musket.IsLastStage, "Musket first stage");
         musket.Advance(); Check(musket.Magnification == 6 && musket.IsLastStage, "Musket last stage");
-        bool threw = false; try { new ScopeCycle(new int[0]); } catch (ArgumentException) { threw = true; }
+        bool threw = false; try { new ScopeCycle(new float[0]); } catch (ArgumentException) { threw = true; }
         Check(threw, "Scope needs a stage");
+
+        // Interchangeable optics: metaInt low byte, 0 = factory ACOG so 0.14.x rifles are unchanged.
+        Check(M4Scopes.Effective(0) == M4ScopeKind.Acog && M4Scopes.Effective(7) == M4ScopeKind.Acog && M4Scopes.Effective(255) == M4ScopeKind.Acog, "Default / unknown optic is the ACOG");
+        for (int k = 1; k <= M4Scopes.Count; k++)
+        {
+            int meta = M4Scopes.WithKind(0x12345600, (M4ScopeKind)k);
+            Check(M4Scopes.Effective(meta) == (M4ScopeKind)k && (meta & ~0xFF) == 0x12345600, "Optic byte round-trips and keeps other bits " + k);
+        }
+        Check(M4Scopes.ItemKinds.Length == 5 && !M4Scopes.HasItem(M4ScopeKind.Iron) && !M4Scopes.HasItem(M4ScopeKind.Default), "Five optic items; iron sights are not an item");
+        foreach (M4ScopeKind kind in M4Scopes.ItemKinds)
+        {
+            M4ScopeKind back;
+            ushort id = M4Scopes.ItemId(kind);
+            Check(id >= 47932 && id <= 47936 && M4Scopes.FromItem(id, out back) && back == kind, "Optic item id maps both ways " + kind);
+        }
+        M4ScopeKind none;
+        Check(!M4Scopes.FromItem(47931, out none) && !M4Scopes.FromItem(47937, out none) && !M4Scopes.FromItem(290, out none), "Ammo / neighbours are not optics");
+        M4ScopeSwap swap = M4Scopes.PlanAttach(0, 1, M4ScopeKind.RedDot);
+        Check(swap.Apply && swap.Returned == M4ScopeKind.Acog && M4Scopes.Effective(swap.NewMeta) == M4ScopeKind.RedDot && !swap.Split, "Red dot on a factory rifle returns the ACOG");
+        swap = M4Scopes.PlanAttach(M4Scopes.WithKind(0, M4ScopeKind.Iron), 1, M4ScopeKind.Sniper);
+        Check(swap.Apply && swap.Returned == M4ScopeKind.Iron && !M4Scopes.HasItem(swap.Returned), "Optic on iron sights returns nothing");
+        Check(!M4Scopes.PlanAttach(0, 1, M4ScopeKind.Acog).Apply && !M4Scopes.PlanAttach(0, 1, M4ScopeKind.Iron).Apply && !M4Scopes.PlanAttach(0, 0, M4ScopeKind.Holo).Apply, "Same optic, iron or empty stack is refused");
+        Check(M4Scopes.PlanAttach(0, 3, M4ScopeKind.Holo).Split, "Stacked rifles are split so one gets the optic");
+        swap = M4Scopes.PlanDetach(M4Scopes.WithKind(0, M4ScopeKind.Brass), 1);
+        Check(swap.Apply && swap.Returned == M4ScopeKind.Brass && M4Scopes.Effective(swap.NewMeta) == M4ScopeKind.Iron, "Detach returns the optic and leaves iron sights");
+        Check(M4Scopes.PlanDetach(0, 1).Returned == M4ScopeKind.Acog && !M4Scopes.PlanDetach(M4Scopes.WithKind(0, M4ScopeKind.Iron), 1).Apply, "Detach factory ACOG; nothing to detach from irons");
+        for (int k = 1; k <= M4Scopes.Count; k++)
+        {
+            M4ScopeProfile p = M4Scopes.Profile((M4ScopeKind)k);
+            Check(p.Kind == (M4ScopeKind)k && p.Stages.Length > 0 && p.SpreadFactor > 0 && p.SpreadFactor < 1 && p.Role != null, "Profile complete " + k);
+            for (int i = 1; i < p.Stages.Length; i++) Check(p.Stages[i] > p.Stages[i - 1], "Stages ascend " + k);
+            Check(p.Magnified == (p.Stages[0] >= 3), "Magnified optics start at 3x or more; 1x sights align " + k);
+            Check(p.Magnified || (p.EyeDistance > .03f && p.EyeDistance < .2f && p.SightY > .08f && p.SightY < .1f), "Aligned sights have an eye point " + k);
+            Check(p.FoldedIrons == (p.Kind != M4ScopeKind.Iron && p.Kind != M4ScopeKind.Sniper), "Folded BUIS except irons and the sniper mount " + k);
+        }
+        Check(M4Scopes.Stages(M4ScopeKind.Acog, 6)[0] == 6 && M4Scopes.Stages(M4ScopeKind.Sniper, 6).Length == 3, "ACOG power from config; sniper 3/6/9");
+        Check(M4Scopes.Profile(M4ScopeKind.Sniper).SpreadFactor < M4Scopes.Profile(M4ScopeKind.RedDot).SpreadFactor, "Higher power aims tighter");
+        float ring = M4Scopes.MoaToPixels(M4Scopes.HoloRingMoa, 70 / 1.5f, 1080);
+        Check(ring > 20 && ring < 30, "65 MOA holo ring is ~24 px at 1080p / 1.5x: " + ring);
+        ScopeCycle close = new ScopeCycle(1.3f);
+        close.Advance(); Check(close.IsActive && Math.Abs(close.Magnification - 1.3f) < 1e-6 && close.IsLastStage, "1.3x iron-sight stage");
 
         // Synthesized audio: valid RIFF/PCM16, peaks normalized, no NaN, deterministic per variant.
         foreach (M4Sound.Kind kind in Enum.GetValues(typeof(M4Sound.Kind)))

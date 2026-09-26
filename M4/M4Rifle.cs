@@ -50,12 +50,29 @@ namespace TonyMods
         private GUIStyle hudStyle, noticeStyle;
         private sealed class Casing { public Transform Body; public Vector3 Velocity; public float Life; }
 
-        public void Bind(GunTool native)
+        private M4ScopeKind scope;
+        private float loadoutAt;
+        internal M4ScopeKind Scope { get { return scope; } }
+
+        internal static M4ScopeProfile ProfileFor(GunTool gun)
+        {
+            M4Rifle rifle = gun != null ? gun.GetComponent<M4Rifle>() : null;
+            return rifle != null ? M4Scopes.Profile(rifle.scope) : null;
+        }
+
+        internal static Transform AnchorFor(GunTool gun)
+        {
+            M4Rifle rifle = gun != null ? gun.GetComponent<M4Rifle>() : null;
+            return rifle != null && rifle.model != null ? rifle.model.Anchor : null;
+        }
+
+        public void Bind(GunTool native, Item item)
         {
             gun = native;
+            scope = M4Scopes.Profile(M4Scopes.Effective(item.metaInt)).Kind;
             if (model == null)
             {
-                model = M4Model.Skin(gun.transform, true, M4Armory.ModelScale, M4Armory.FirstPersonOffset, M4Armory.Fde);
+                model = M4Model.Skin(gun.transform, true, M4Armory.ModelScale, M4Armory.FirstPersonOffset, M4Armory.Fde, scope);
                 if (model == null) throw new InvalidOperationException("Native musket mesh missing from fp prefab");
                 gun.endPoint = model.Muzzle;
             }
@@ -75,6 +92,18 @@ namespace TonyMods
         private bool Idle { get { return (GunTool.State)StateField.GetValue(gun) == GunTool.State.Idle; } }
         // Reload in progress or being started: native CheckReload must not start another one.
         internal bool Busy { get { return starting || Reloading; } }
+
+        // GunTool.UpdSpecs postfix: the rifle Item changed (charge, durability or the fitted optic).
+        public void OnItem(Item item)
+        {
+            M4ScopeKind next = M4Scopes.Profile(M4Scopes.Effective(item.metaInt)).Kind;
+            if (next == scope || model == null) return;
+            scope = next;
+            model.SetScope(scope);
+            MusketScope.Refresh(gun);
+            loadoutAt = 0;
+            notice = M4Armory.Text("瞄準鏡：", "Optic: ") + M4Armory.ScopeName(scope); noticeUntil = Time.unscaledTime + 1.5f;
+        }
 
         public void AfterSelected()
         {
@@ -99,14 +128,16 @@ namespace TonyMods
             ShotTimerField.SetValue(gun, gun.fireRate);
             batch.Add(Time.time);
             bool scoped = MusketScope.IsScoped(gun);
-            gun.spreadAngle = M4Rules.Spread(heat, scoped);
+            M4ScopeProfile optic = M4Scopes.Profile(scope);
+            bool hidden = scoped && optic.Magnified;
+            gun.spreadAngle = M4Rules.Spread(heat, scoped ? optic.SpreadFactor : 1);
             heat += 1; lastShot = Time.time;
             RaycastMethod.Invoke(gun, null);
             Remember(gun.clipContent);
             // May re-enter StartReload on the host when the magazine hits zero (see Flush).
             if (M4Rules.ShouldFlush(batch.Charge, 0, gun.clipContent)) Flush();
             kick = 1;
-            if (!scoped) { model.Flash(); Eject(); }
+            if (!hidden) { model.Flash(); Eject(); }
             float climb = M4Rules.Recoil(scoped, M4Armory.RecoilScale);
             pitchDebt += climb * UnityEngine.Random.Range(.85f, 1.15f);
             yawDebt += UnityEngine.Random.Range(-.13f, .13f) * M4Armory.RecoilScale;
@@ -252,6 +283,13 @@ namespace TonyMods
                 SetSelector(); Sound(M4Sound.Kind.Mode);
                 notice = M4Armory.Text(automatic ? "全自動" : "半自動", automatic ? "Full auto" : "Semi-auto"); noticeUntil = Time.unscaledTime + 1.2f;
             }
+            if (CanUse() && Input.GetKeyDown(M4Armory.DetachKey) && !Reloading)
+            {
+                if (M4Scopes.HasItem(scope)) M4Armory.RequestDetach(ItemId);
+                else { notice = M4Armory.Text("沒有裝瞄準鏡", "No optic fitted"); noticeUntil = Time.unscaledTime + 1.2f; }
+            }
+            // Teammates only learn the held item's data ID, so the optic is announced (and repeated for late joiners).
+            if (Time.unscaledTime >= loadoutAt) { loadoutAt = Time.unscaledTime + 3; M4Armory.SendLoadout(scope); }
             ApplyRecoil(dt);
             kick = Mathf.MoveTowards(kick, 0, dt * 14);
             if (reload == null)
@@ -304,7 +342,7 @@ namespace TonyMods
             casings.Add(new Casing { Body = brass.transform, Velocity = new Vector3(UnityEngine.Random.Range(.9f, 1.2f), UnityEngine.Random.Range(.8f, 1.1f), -.3f), Life = .6f });
         }
 
-        private void OnEnable() { Active = this; }
+        private void OnEnable() { Active = this; loadoutAt = 0; }
 
         private void OnDisable()
         {
@@ -329,7 +367,7 @@ namespace TonyMods
             hudStyle.fontSize = Mathf.RoundToInt(26 * unit); noticeStyle.fontSize = Mathf.RoundToInt(24 * unit);
             uint spare = PlayerInventory.Instance.inventory.GetItemAmount(M4Armory.AmmoId);
             string mode = Reloading ? M4Armory.Text("換彈中", "Reloading") : automatic ? M4Armory.Text("全自動", "Auto") : M4Armory.Text("半自動", "Semi");
-            string text = gun.clipContent + " / " + gun.clipSize + "   " + spare + "   " + mode;
+            string text = gun.clipContent + " / " + gun.clipSize + "   " + spare + "   " + mode + "   " + M4Armory.ScopeName(scope);
             Rect box = new Rect(Screen.width - 520 * unit, Screen.height - 150 * unit, 480 * unit, 40 * unit);
             Color previous = GUI.color;
             GUI.color = new Color(0, 0, 0, .75f); GUI.Label(new Rect(box.x + 2 * unit, box.y + 2 * unit, box.width, box.height), text, hudStyle);

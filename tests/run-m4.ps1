@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $output = Join-Path $root 'bin\M4RulesTests.exe'
-& $compiler /nologo /target:exe ('/out:'+$output) (Join-Path $PSScriptRoot 'M4RulesTests.cs') (Join-Path $root 'M4\M4Rules.cs') (Join-Path $root 'M4\M4Sound.cs') (Join-Path $root 'GunScope\ScopeMath.cs')
+& $compiler /nologo /target:exe ('/out:'+$output) (Join-Path $PSScriptRoot 'M4RulesTests.cs') (Join-Path $root 'M4\M4Rules.cs') (Join-Path $root 'M4\M4Sound.cs') (Join-Path $root 'M4\M4Scopes.cs') (Join-Path $root 'GunScope\ScopeMath.cs')
 if ($LASTEXITCODE -ne 0) { throw 'M4 test compilation failed' }
 & $output
 if ($LASTEXITCODE -ne 0) { throw 'M4 rule checks failed' }
@@ -73,6 +73,31 @@ try {
     $spawn = Body (Method (Def $game 'PlayerInventory') 'OnInventoryAdd' 'UInt16')
     if (!($spawn -match 'ItemData::fpPrefab') -or !($spawn -match 'GunTool::SetItem')) { throw 'Native fp gun spawn changed' }
 
+    # Optics: dragging an item whose useItemOnItemType != 0 onto another calls UseItemOnItem on the host,
+    # which natively only acts on 1 (repair) / 2 (reforge) -> the M4 optic value (40) is inert without the mod.
+    $use = @(Body (Method $items 'UseItemOnItem' 'UseItemOnItemType,UInt32,ItemData,UInt32'))
+    $calls = @($use | Where-Object { $_ -match '^IL_\w+: call' })
+    if ($calls.Count -ne 2 -or !($use -match 'ItemManager::RepairTool') -or !($use -match 'ItemManager::ReforgingStone')) { throw 'UseItemOnItem now handles more types; re-check the optic use value' }
+    $drag = Body (Method (Def $game 'ContainerManager') 'OnItemDragServerRpc' $null)
+    if (!($drag -match 'ItemData::useItemOnItemType') -or !($drag -match 'ItemManager::UseItemOnItem')) { throw 'Inventory drag no longer routes use-item-on-item' }
+    [void](Method $items 'GetItemById' 'UInt32,Item&,ContainerNet&'); [void](Method (Def $game 'ContainerManager') 'GetPlayerContainer' 'UInt64,ContainerNet&')
+    foreach ($m in @(@('AddNewItem','Item,Vector3,Boolean'),@('SetItemById','UInt32,Item'),@('RemoveItemAmount','UInt32,UInt16'))) { [void](Method $container $m[0] $m[1]) }
+    [void](Method (Def $game 'PlayerManager') 'GetPlayerDropPos' 'UInt64'); [void](Method $gun 'UpdSpecs' 'Item')
+    # metaInt stores the optic: only the Item ctor and lottery tickets may write it, and saves/network carry it.
+    function AllTypes($types) { foreach ($t in $types) { $t; AllTypes $t.NestedTypes } }
+    $writers = @(); $hands = @()
+    foreach ($t in (AllTypes $game.MainModule.Types)) { foreach ($m in $t.Methods) { if (!$m.HasBody) { continue }
+        foreach ($i in $m.Body.Instructions) {
+            if ($i.OpCode.Code -eq 'Stfld' -and "$($i.Operand)" -match 'Item::metaInt') { $writers += "$($t.Name)::$($m.Name)" }
+            if ("$($i.Operand)" -match 'PlayerMovement::fpHands|PlayerInventory::fpHands') { $hands += "$($t.Name)::$($m.Name)" } } } }
+    $writers = @($writers | Sort-Object -Unique)
+    if (($writers | Where-Object { $_ -notin @('Item::.ctor','LotteryManager::SpawnTicket') }).Count) { throw ('Unexpected metaInt writer: ' + ($writers -join ', ')) }
+    if (!((Body (Method (Def $game 'Item') 'NetworkSerialize' $null)) -match 'Item::metaInt')) { throw 'metaInt no longer synced' }
+    if (!((Def $game 'SavedCont').Fields | Where-Object { $_.Name -eq 'items' -and $_.FieldType.Name -eq 'Item[]' })) { throw 'Saved containers no longer store Item[]' }
+    # ADS moves FPView/Hands; no native code may drive that transform.
+    $hands = @($hands | Sort-Object -Unique)
+    if (($hands | Where-Object { $_ -notin @('PlayerMovement::OnEnable','PlayerInventory::OnInventoryAdd','PlayerInventory::OnInventoryChange','PlayerInventory::SetToolsVisibility') }).Count) { throw ('New fpHands user, re-check ADS: ' + ($hands -join ', ')) }
+    $count += 6
     $core = Def $fmod 'FMOD.System'
     [void](Method $core 'createSound' 'Byte[],MODE,CREATESOUNDEXINFO&,Sound&'); [void](Method $core 'playSound' 'Sound,ChannelGroup,Boolean,Channel&'); [void](Method $core 'getMasterChannelGroup' 'ChannelGroup&')
     $channel = Def $fmod 'FMOD.Channel'
@@ -85,15 +110,18 @@ try {
     foreach ($name in @('M4Armory','M4Rifle','M4Model','M4Audio','M4Sound','M4Rules','MusketScope','HorseStable','ItemStacks','ChestQuickStack','YouTubeJukeboxPanel')) { [void](Def $mod "TonyMods.$name"); $count++ }
     $armory = Def $mod 'TonyMods.M4Armory'
     $handlers = @{ RegisterItems='ItemManager'; AfterSetItem='GunTool,Item'; AfterSelected='GunTool'; BeforeFire='GunTool'; BeforeReload='GunTool'; BeforeCheckReload='GunTool';
-        BeforeHandItem='PlayerAnimTP,GameObject&'; AfterHandItem='PlayerAnimTP,UInt32,GameObject'; AfterCollectibleSpawn='CollectibleNet'; AfterCollectibleItem='CollectibleNet,Item' }
+        BeforeHandItem='PlayerAnimTP,GameObject&'; AfterHandItem='PlayerAnimTP,UInt32,GameObject'; AfterCollectibleSpawn='CollectibleNet'; AfterCollectibleItem='CollectibleNet,Item'; BeforeUseItemOnItem='UInt32,ItemData,UInt32,Boolean&'; AfterSpecs='GunTool,Item' }
     foreach ($h in $handlers.Keys) {
         $m = Method $armory $h $handlers[$h]
-        if ($h -in @('BeforeFire','BeforeReload','BeforeCheckReload') -and $m.ReturnType.Name -ne 'Boolean') { throw "$h must be a skipping prefix" }
-        foreach ($p in $m.Parameters) { if ($p.Name -notin @('__instance','__0','__1','__state')) { throw "Harmony parameter $($p.Name) in $h must be __instance or positional" } }
+        if ($h -in @('BeforeFire','BeforeReload','BeforeCheckReload','BeforeUseItemOnItem') -and $m.ReturnType.Name -ne 'Boolean') { throw "$h must be a skipping prefix" }
+        foreach ($p in $m.Parameters) { if ($p.Name -notin @('__instance','__0','__1','__2','__3','__state','__result')) { throw "Harmony parameter $($p.Name) in $h must be __instance or positional" } }
     }
     $init = Body (Method $armory 'Initialize' 'ConfigFile,ManualLogSource')
     foreach ($target in @('"Awake"','"SetItem"','"Selected"','"Fire"','"Reload"','"CheckReload"','"OnSelectedHandItemDataId"','"OnNetworkSpawn"','"OnItemValueChanged"')) { if (!($init -match [Regex]::Escape($target))) { throw "Patch target $target not installed" }; $count++ }
-    foreach ($res in @(@('Tony.M4.model.json','M4\Assets\model.json'),@('Tony.M4.icon.png','M4\Assets\m4-icon.png'),@('Tony.M4.ammo.png','M4\Assets\ammo-icon.png'))) {
+    $optics = Body (Method $armory 'PatchOptics' '')
+    foreach ($target in @('"UseItemOnItem"','"UpdSpecs"')) { if (!($optics -match [Regex]::Escape($target))) { throw "Optic patch target $target not installed" }; $count++ }
+    if (!($init -match 'M4Armory::PatchOptics')) { throw 'Optic patches not installed from Initialize' }
+    foreach ($res in @(@('Tony.M4.model.json','M4\Assets\model.json'),@('Tony.M4.icon.png','M4\Assets\m4-icon.png'),@('Tony.M4.ammo.png','M4\Assets\ammo-icon.png'),@('Tony.M4.scope2.png','M4\Assets\scope-reddot.png'),@('Tony.M4.scope3.png','M4\Assets\scope-holo.png'),@('Tony.M4.scope4.png','M4\Assets\scope-acog.png'),@('Tony.M4.scope5.png','M4\Assets\scope-brass.png'),@('Tony.M4.scope6.png','M4\Assets\scope-sniper.png'))) {
         $r = $mod.MainModule.Resources | Where-Object Name -eq $res[0]
         if (!$r) { throw "Missing resource $($res[0])" }
         $expected = [IO.File]::ReadAllBytes((Join-Path $root $res[1]))

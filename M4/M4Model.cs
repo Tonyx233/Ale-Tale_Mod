@@ -28,6 +28,9 @@ namespace TonyMods
         private readonly Dictionary<string, Vector3> rest = new Dictionary<string, Vector3>();
         private readonly List<KeyValuePair<Renderer, Piece>> renderers = new List<KeyValuePair<Renderer, Piece>>();
         private Renderer native;
+        private Transform mapping;
+        private readonly Dictionary<M4ScopeKind, Transform> anchors = new Dictionary<M4ScopeKind, Transform>();
+        public M4ScopeKind Scope { get; private set; }
         private GameObject flash;
         private Light flashLight;
         private float flashUntil;
@@ -38,14 +41,16 @@ namespace TonyMods
         public static bool IsSkinned(Transform root) { return root != null && root.GetComponentInChildren<M4Model>(true) != null; }
 
         // Returns null when the prefab no longer carries the native musket mesh.
-        public static M4Model Skin(Transform root, bool firstPerson, float scale, Vector3 offset, bool fde)
+        public static M4Model Skin(Transform root, bool firstPerson, float scale, Vector3 offset, bool fde, M4ScopeKind scope)
         {
             if (root == null) return null;
             M4Model existing = root.GetComponentInChildren<M4Model>(true);
-            if (existing != null) return existing;
+            if (existing != null) { existing.SetScope(scope); return existing; }
             Transform mesh = Find(root, NativeMesh);
             if (mesh == null) return null;
-            return Attach(mesh, firstPerson, scale, offset, fde);
+            M4Model model = Attach(mesh, firstPerson, scale, offset, fde);
+            model.SetScope(scope);
+            return model;
         }
 
         private static Transform Find(Transform root, string name)
@@ -72,7 +77,7 @@ namespace TonyMods
 
         private void Build(Transform mesh, bool firstPerson, float scale, Vector3 offset, bool fde)
         {
-            Transform mapping = Node("Mapping", transform);
+            mapping = Node("Mapping", transform);
             mapping.localPosition = new Vector3(ButtX - ModelButt * scale, BoreY - ModelBore * scale, 0) + offset;
             mapping.localRotation = Quaternion.Euler(0, -90, 0);
             mapping.localScale = Vector3.one * scale;
@@ -96,6 +101,14 @@ namespace TonyMods
                 renderers.Add(new KeyValuePair<Renderer, Piece>(renderer, p));
             }
             Muzzle = Node("Muzzle", bones["rifle"]); Muzzle.localPosition = new Vector3(0, ModelBore, .612f);
+            // ADS anchors sit under Mapping, outside Recoil: aligning on them keeps the recoil kick visible.
+            foreach (M4ScopeKind kind in new[] { M4ScopeKind.Iron, M4ScopeKind.RedDot, M4ScopeKind.Holo })
+            {
+                M4ScopeProfile profile = M4Scopes.Profile(kind);
+                Transform anchor = Node("Sight " + kind, mapping);
+                anchor.localPosition = new Vector3(0, profile.SightY, profile.SightZ);
+                anchors[kind] = anchor;
+            }
             Port = Node("Ejection port", bones["rifle"]); Port.localPosition = new Vector3(.024f, .018f, .1f);
             BuildFlash();
             SetColorway(fde);
@@ -111,6 +124,23 @@ namespace TonyMods
 
         private static bool IsPolymer(Piece p) { return p.role == "furniture" || p.role == "mag" || p.name == "Butt pad" || p.name == "Eye guard"; }
         private static Vector3 V(float[] v) { return v == null || v.Length < 3 ? Vector3.zero : new Vector3(v[0], v[1], v[2]); }
+
+        // Sight point of the fitted optic for aligned ADS; null for magnified optics.
+        public Transform Anchor { get { Transform t; return anchors.TryGetValue(Scope, out t) ? t : null; } }
+
+        // One optic role visible; raised BUIS only without optic, folded BUIS where the mount leaves room.
+        public void SetScope(M4ScopeKind kind)
+        {
+            M4ScopeProfile profile = M4Scopes.Profile(kind);
+            Scope = profile.Kind;
+            foreach (var pair in renderers)
+            {
+                string role = pair.Value.role;
+                if (role == null || !(role.StartsWith("scope-", StringComparison.Ordinal) || role.StartsWith("iron-", StringComparison.Ordinal))) continue;
+                bool show = role == profile.Role || (role == "iron-down" && profile.FoldedIrons);
+                if (pair.Key.gameObject.activeSelf != show) pair.Key.gameObject.SetActive(show);
+            }
+        }
 
         public void SetColorway(bool fde)
         {

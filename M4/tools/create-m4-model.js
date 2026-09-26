@@ -33,6 +33,23 @@ function loft(name, b, color, rings, sides = 12, role, phase = 0) {
   for (let j = 0; j < sides; j++) { tri(p, first, j, (j + 1) % sides, back); tri(p, last, off + j, off + (j + 1) % sides, back.map(v => -v)); }
   return p;
 }
+// Hollow tube along Z: rings [x, y, z, outer, inner]; outer faces out, bore faces the axis, annular ends.
+function pipe(name, b, color, rings, sides = 16, role) {
+  const p = mesh(name, b, color, role), n = rings.length;
+  for (const [x, y, z, ro] of rings) for (let j = 0; j < sides; j++) { const a = j * 2 * Math.PI / sides; vertex(p, [x + ro * Math.cos(a), y + ro * Math.sin(a), z]); }
+  for (const [x, y, z, ro, ri] of rings) for (let j = 0; j < sides; j++) { const a = j * 2 * Math.PI / sides; vertex(p, [x + ri * Math.cos(a), y + ri * Math.sin(a), z]); }
+  const O = (k, j) => k * sides + (j % sides), I = (k, j) => (n + k) * sides + (j % sides);
+  for (let k = 0; k < n - 1; k++) for (let j = 0; j < sides; j++) {
+    const a = Math.PI * 2 * (j + .5) / sides, [x, y] = rings[k];
+    const out = [Math.cos(a), Math.sin(a), 0], inward = [-out[0], -out[1], 0];
+    tri(p, O(k, j), O(k, j + 1), O(k + 1, j + 1), out); tri(p, O(k, j), O(k + 1, j + 1), O(k + 1, j), out);
+    tri(p, I(k, j), I(k, j + 1), I(k + 1, j + 1), inward); tri(p, I(k, j), I(k + 1, j + 1), I(k + 1, j), inward);
+  }
+  for (const [k, dir] of [[0, -1], [n - 1, 1]]) for (let j = 0; j < sides; j++) {
+    tri(p, O(k, j), O(k, j + 1), I(k, j + 1), [0, 0, dir]); tri(p, O(k, j), I(k, j + 1), I(k, j), [0, 0, dir]);
+  }
+  return p;
+}
 // Cylinder along an arbitrary axis ('x' or 'y') for turrets, pins and nuts.
 function cyl(name, b, color, c, axis, r, len, sides = 10, role) {
   const p = mesh(name, b, color, role), h = len / 2, ends = [-h, h];
@@ -161,20 +178,73 @@ prism('Magazine', 'mag', C.mag, [...back, ...front.reverse()], -.0125 * W, .0125
 for (let i = 1; i < 7; i++) { const t = i / 8, y = -.012 - .172 * t, bend = .048 * Math.pow(t, 1.7); box('Mag rib', 'mag', C.mag, [0, y, bend], [.0125 * W * 2 + .002, .004, .05], 'mag'); }
 prism('Floor plate', 'mag', C.metal, [[.01, -.18], [.087, -.18], [.087, -.192], [.01, -.192]], -.0145 * W, .0145 * W, 'mag');
 
+// Interchangeable optics (0.15.0). One role is visible at a time; M4Model.SetScope picks it.
+// Sight points used for aligned ADS live in M4/M4Scopes.cs (SightY / SightZ) and must match these.
+const scopeBrass = [.72, .52, .2], coating = [.5, .2, .2], glassDark = [.05, .08, .1];
+// Rear flip-up BUIS, ghost-ring aperture 12 mm: centre (0, .091, .021) lines up with the front post tip (.091).
+box('BUIS base', 'rifle', C.metal, [0, .0525, .02], [.024 * W, .007, .03]);
+box('BUIS leaf', 'rifle', C.metal, [0, .0705, .021], [.017, .029, .004], 'iron-up');
+box('BUIS ring top', 'rifle', C.metal, [0, .09825, .021], [.017, .0025, .004], 'iron-up');
+for (const side of [-1, 1]) {
+  box('BUIS ring side', 'rifle', C.metal, [side * .00725, .091, .021], [.0025, .012, .004], 'iron-up');
+  box('BUIS ear', 'rifle', C.metal, [side * .0115, .078, .021], [.003, .044, .012], 'iron-up');
+}
+box('BUIS folded leaf', 'rifle', C.metal, [0, .0585, .028], [.02, .005, .03], 'iron-down');
+// Red dot on a riser (tube sight). Sight point = tube axis (0, .086, .08).
+prism('Red dot riser', 'rifle', C.scope, [[.055, .049], [.105, .049], [.1, .068], [.06, .068]], -.012 * W, .012 * W, 'scope-reddot');
+box('Red dot saddle', 'rifle', C.scope, [0, .0725, .08], [.018 * W, .01, .03], 'scope-reddot');
+pipe('Red dot body', 'rifle', C.scope, [[0, .086, .05, .0165, .0135], [0, .086, .056, .0175, .0145], [0, .086, .104, .0175, .0145], [0, .086, .108, .019, .0158], [0, .086, .114, .019, .0158]], 16, 'scope-reddot');
+pipe('Red dot coating', 'rifle', coating, [[0, .086, .1125, .0158, .0142], [0, .086, .1135, .0158, .0142]], 16, 'scope-reddot');
+cyl('Red dot elevation', 'rifle', C.scope, [0, .086 + .0215, .08], 'y', .0065, .008, 10, 'scope-reddot');
+cyl('Red dot windage', 'rifle', C.scope, [.0215, .086, .08], 'x', .0065, .008, 10, 'scope-reddot');
+cyl('Red dot lever', 'rifle', C.metal, [.016 * W, .058, .08], 'x', .005, .008, 8, 'scope-reddot');
+// Holographic box sight with an open window. Sight point = window centre (0, .085, .084).
+prism('Holo base', 'rifle', C.scope, [[.045, .049], [.132, .049], [.132, .066], [.045, .062]], -.0155 * W, .0155 * W, 'scope-holo');
+box('Holo battery', 'rifle', C.scope, [0, .075, .122], [.03 * W, .02, .02], 'scope-holo');
+for (const side of [-1, 1]) box('Holo hood side', 'rifle', C.scope, [side * (.0155 * W - .002), .085, .084], [.004, .038, .048], 'scope-holo');
+box('Holo hood top', 'rifle', C.scope, [0, .107, .084], [.031 * W, .006, .048], 'scope-holo');
+for (const x of [-.006, .006]) box('Holo button', 'rifle', C.rubber, [x, .064, .047], [.008, .006, .006], 'scope-holo');
+box('Holo glass rim', 'rifle', coating, [0, .0665, .084], [.02, .0015, .046], 'scope-holo');
+// Brass rifle scope on picatinny rings (magnified 3x / 6x).
+for (const z of [.04, .14]) {
+  box('Brass ring clamp', 'rifle', C.metal, [0, .056, z], [.026 * W, .014, .014], 'scope-brass');
+  box('Brass ring post', 'rifle', C.metal, [0, .066, z], [.012, .022, .01], 'scope-brass');
+  loft('Brass ring', 'rifle', C.metal, [[0, .085, z - .006, .0175, .0175], [0, .085, z + .006, .0175, .0175]], 14, 'scope-brass');
+}
+loft('Brass tube', 'rifle', scopeBrass, [[0, .085, -.005, .0135, .0135], [0, .085, .17, .0135, .0135], [0, .085, .2, .021, .021], [0, .085, .235, .021, .021]], 14, 'scope-brass');
+loft('Brass eyepiece', 'rifle', scopeBrass, [[0, .085, -.03, .018, .018], [0, .085, -.005, .018, .018], [0, .085, .005, .0135, .0135]], 14, 'scope-brass');
+cyl('Brass dial', 'rifle', scopeBrass, [0, .085 + .0175, .09], 'y', .007, .008, 10, 'scope-brass');
+loft('Brass front lens', 'rifle', [.1, .2, .22], [[0, .085, .2352, .018, .018], [0, .085, .236, .018, .018]], 14, 'scope-brass');
+loft('Brass rear lens', 'rifle', glassDark, [[0, .085, -.0308, .015, .015], [0, .085, -.03, .015, .015]], 14, 'scope-brass');
+// Long-range scope on a cantilever mount (3x / 6x / 9x). The mount covers the BUIS, so none is drawn.
+prism('Sniper mount', 'rifle', C.scope, [[.005, .049], [.16, .049], [.155, .062], [.01, .062]], -.012 * W, .012 * W, 'scope-sniper');
+for (const z of [.03, .13]) {
+  box('Sniper ring post', 'rifle', C.scope, [0, .068, z], [.014, .016, .012], 'scope-sniper');
+  loft('Sniper ring', 'rifle', C.scope, [[0, .092, z - .008, .0185, .0185], [0, .092, z + .008, .0185, .0185]], 14, 'scope-sniper');
+}
+loft('Sniper tube', 'rifle', C.scope, [[0, .092, -.02, .015, .015], [0, .092, .2, .015, .015], [0, .092, .225, .026, .026], [0, .092, .275, .026, .026]], 16, 'scope-sniper');
+loft('Sniper eyepiece', 'rifle', C.scope, [[0, .092, -.075, .02, .02], [0, .092, -.035, .02, .02], [0, .092, -.02, .015, .015]], 16, 'scope-sniper');
+box('Sniper throw lever', 'rifle', C.metal, [.022, .092, -.05], [.012, .006, .01], 'scope-sniper');
+cyl('Sniper elevation', 'rifle', C.scope, [0, .092 + .022, .09], 'y', .01, .014, 12, 'scope-sniper');
+cyl('Sniper windage', 'rifle', C.scope, [.022, .092, .09], 'x', .01, .014, 12, 'scope-sniper');
+cyl('Sniper parallax', 'rifle', C.scope, [-.02, .092, .1], 'x', .008, .01, 12, 'scope-sniper');
+loft('Sniper front lens', 'rifle', [.12, .28, .3], [[0, .092, .2752, .023, .023], [0, .092, .276, .023, .023]], 16, 'scope-sniper');
+loft('Sniper rear lens', 'rifle', glassDark, [[0, .092, -.0758, .016, .016], [0, .092, -.075, .016, .016]], 16, 'scope-sniper');
+
 // Trijicon TA31-style 4x32 ACOG on a thumb-nut mount.
 const sy = .086;
-prism('Scope mount', 'rifle', C.scope, [[.04, .049], [.135, .049], [.13, .066], [.045, .066]], -.013 * W, .013 * W, 'scope');
-for (const z of [.06, .115]) cyl('Thumb nut', 'rifle', C.scope, [-.02 * W, .056, z], 'x', .0075, .01, 10, 'scope');
+prism('Scope mount', 'rifle', C.scope, [[.04, .049], [.135, .049], [.13, .066], [.045, .066]], -.013 * W, .013 * W, 'scope-acog');
+for (const z of [.06, .115]) cyl('Thumb nut', 'rifle', C.scope, [-.02 * W, .056, z], 'x', .0075, .01, 10, 'scope-acog');
 loft('ACOG body', 'rifle', C.scope, [
   [0, sy, .028, .0175, .0175], [0, sy, .04, .0182, .0182], [0, sy, .046, .0205, .021], [0, sy, .06, .0225, .0235],
-  [0, sy, .125, .0225, .0235], [0, sy, .138, .0205, .0205], [0, sy, .145, .0228, .0228], [0, sy, .178, .0228, .0228]], 14, 'scope');
-loft('Eye guard', 'rifle', C.rubber, [[0, sy, .016, .0168, .0168], [0, sy, .03, .0172, .0172]], 14, 'scope');
-prism('Fiber housing', 'rifle', C.scope, [[.084, sy + .02], [.142, sy + .02], [.142, sy + .028], [.092, sy + .03], [.084, sy + .028]], -.0065, .0065, 'scope');
-box('Fiber optic', 'rifle', C.fiber, [0, sy + .031, .117], [.008, .003, .046], 'scope');
-cyl('Elevation turret', 'rifle', C.scope, [0, sy + .026, .066], 'y', .0085, .01, 12, 'scope');
-cyl('Windage turret', 'rifle', C.scope, [.026 * W, sy, .084], 'x', .0085, .01, 12, 'scope');
-loft('Objective lens', 'rifle', C.lens, [[0, sy, .1785, .0192, .0192], [0, sy, .1795, .0192, .0192]], 14, 'scope');
-loft('Ocular lens', 'rifle', C.lensRear, [[0, sy, .0155, .0145, .0145], [0, sy, .0165, .0145, .0145]], 14, 'scope');
+  [0, sy, .125, .0225, .0235], [0, sy, .138, .0205, .0205], [0, sy, .145, .0228, .0228], [0, sy, .178, .0228, .0228]], 14, 'scope-acog');
+loft('Eye guard', 'rifle', C.rubber, [[0, sy, .016, .0168, .0168], [0, sy, .03, .0172, .0172]], 14, 'scope-acog');
+prism('Fiber housing', 'rifle', C.scope, [[.084, sy + .02], [.142, sy + .02], [.142, sy + .028], [.092, sy + .03], [.084, sy + .028]], -.0065, .0065, 'scope-acog');
+box('Fiber optic', 'rifle', C.fiber, [0, sy + .031, .117], [.008, .003, .046], 'scope-acog');
+cyl('Elevation turret', 'rifle', C.scope, [0, sy + .026, .066], 'y', .0085, .01, 12, 'scope-acog');
+cyl('Windage turret', 'rifle', C.scope, [.026 * W, sy, .084], 'x', .0085, .01, 12, 'scope-acog');
+loft('Objective lens', 'rifle', C.lens, [[0, sy, .1785, .0192, .0192], [0, sy, .1795, .0192, .0192]], 14, 'scope-acog');
+loft('Ocular lens', 'rifle', C.lensRear, [[0, sy, .0155, .0145, .0145], [0, sy, .0165, .0145, .0145]], 14, 'scope-acog');
 
 const tris = parts.reduce((s, p) => s + p.triangles.length / 3, 0);
 fs.writeFileSync(path.join(__dirname, '..', 'Assets', 'model.json'), JSON.stringify({ bones, parts }));
