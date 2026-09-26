@@ -127,34 +127,34 @@ namespace TonyMods
                 if (!active) continue;
                 float t = hitFlash > 0 ? .3f - hitFlash : release;
                 float a = i * 2.39996f;
-                float radius = action == TideRules.Wave ? Mathf.Min(4, .4f + t * 9) : .25f + t * 1.4f;
-                Vector3 center = action == TideRules.Bite ? Vector3.forward * 1.65f : Vector3.zero;
+                float radius = action == TideRules.Wave ? Mathf.Min(TideRules.WaveRadius, .4f + t * TideRules.WaveRadius * 2.25f) : .25f + t * 2.8f;
+                Vector3 center = action == TideRules.Bite ? Vector3.forward * (TideRules.BiteReach * .72f) : Vector3.zero;
                 drop.localPosition = center + new Vector3(Mathf.Sin(a) * radius, (action == TideRules.Wave ? .1f : 1.2f) + t * 2 - t * t * 4, Mathf.Cos(a) * radius);
                 drop.localScale = Vector3.one * (.04f * Mathf.Clamp01(1 - t / .65f));
             }
             materials[3].SetColor("_EmissionColor", new Color(.06f, .7f, .8f) * (action == TideRules.Wave ? .3f + charge * 3 : .18f));
             if (action == TideRules.Bite)
             {
-                torso.localRotation = Quaternion.Euler(-charge * 7, 90 * Mathf.Clamp01(age / .3f), 0);
+                torso.localRotation = Quaternion.Euler(-charge * 7, 90 * Mathf.Clamp01(age / (windup * .6f)), 0);
                 torso.localPosition += new Vector3(0, -charge * .08f, release >= 0 ? pulse * .28f : -charge * .08f);
                 bones["jaw"].localRotation = Quaternion.Euler(0, 0, release < 0 ? charge * 28 : -2);
                 if (release < 0)
-                { warning.enabled = true; warning.positionCount = 5; warning.SetPositions(new[] {new Vector3(-.65f,.035f,0),new Vector3(-.65f,.035f,2.3f),new Vector3(.65f,.035f,2.3f),new Vector3(.65f,.035f,0),new Vector3(-.65f,.035f,0)}); }
+                { warning.enabled = true; warning.positionCount = 5; float w = TideRules.BiteHalfWidth, r = TideRules.BiteReach; warning.SetPositions(new[] {new Vector3(-w,.035f,0),new Vector3(-w,.035f,r),new Vector3(w,.035f,r),new Vector3(w,.035f,0),new Vector3(-w,.035f,0)}); }
                 if (release >= 0 && release < .25f)
-                { effect.enabled = true; effect.positionCount = 3; effect.SetPositions(new[] {new Vector3(0,1.25f,.6f),new Vector3(.04f,1.22f,1.5f),new Vector3(0,1.18f,2.3f)}); }
+                { effect.enabled = true; effect.positionCount = 3; effect.SetPositions(new[] {new Vector3(0,1.25f,.6f),new Vector3(.04f,1.22f,TideRules.BiteReach * .6f),new Vector3(0,1.18f,TideRules.BiteReach)}); }
             }
             else if (action == TideRules.Sweep)
             {
                 torso.localRotation = Quaternion.Euler(0, release < 0 ? -30 * charge : -30 - 120 * Mathf.Clamp01(release / .35f), 0);
-                if (release < 0) Ring(warning, 2.6f, .035f, -60, 60);
-                if (release >= 0 && release < .4f) Ring(effect, 2.6f, .75f, -60, 60);
+                if (release < 0) Ring(warning, TideRules.SweepRadius, .035f, -60, 60);
+                if (release >= 0 && release < .4f) Ring(effect, TideRules.SweepRadius, .75f, -60, 60);
             }
             else if (action == TideRules.Wave)
             {
                 torso.localPosition += Vector3.down * (release < 0 ? charge * .18f : 0);
                 bones["crown"].localScale = new Vector3(1 + charge * .2f, 1, 1);
-                if (release < 0) Ring(warning, 4, .04f, 0, 360);
-                if (release >= 0 && release < .6f) Ring(effect, Mathf.Lerp(.5f, 4, Mathf.Clamp01(release / .4f)), .1f, 0, 360);
+                if (release < 0) Ring(warning, TideRules.WaveRadius, .04f, 0, 360);
+                if (release >= 0 && release < .6f) Ring(effect, Mathf.Lerp(.5f, TideRules.WaveRadius, Mathf.Clamp01(release / .4f)), .1f, 0, 360);
             }
             else if (action == TideRules.Summon && !flight) Ring(effect, .9f * rise, .045f, 0, 360);
             if (dying > 0)

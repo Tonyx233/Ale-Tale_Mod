@@ -17,13 +17,17 @@ namespace TonyMods
 {
     public sealed class TideSummons : MonoBehaviour
     {
-        private const string Channel = "Tony.Tidefork.v1";
+        // v2: snapshots are split into ChunkSize-record parts because the idol count is unbounded.
+        private const string Channel = "Tony.Tidefork.v2";
+        private const int ChunkSize = 12, MaxParts = 1000;
         private static TideSummons instance;
         private ManualLogSource log;
         private Harmony patches;
         private NetworkManager network;
-        private bool ready;
-        private float nextSend, nextHello, noticeUntil;
+        private bool ready, dirty;
+        private float lastSend = -1, nextHello, noticeUntil;
+        private int sequence, incomingSequence = -1, incomingPart;
+        private readonly Dictionary<ulong, Record> incoming = new Dictionary<ulong, Record>();
         private string notice;
         private Sprite icon;
         private Texture2D iconTexture;
@@ -39,7 +43,7 @@ namespace TonyMods
             public double started, born;
             public Vector3 from, landing;
         }
-        [Serializable] public sealed class Snapshot { public int version = 1; public Record[] records; }
+        [Serializable] public sealed class Snapshot { public int version = 2, sequence, part, parts; public Record[] records; }
         internal static double Now { get { return NetworkManager.Singleton == null ? 0 : NetworkManager.Singleton.ServerTime.Time; } }
         internal static bool Owned(Component component) { return component != null && component.GetComponentInParent<TideCreature>() != null; }
 
@@ -58,7 +62,7 @@ namespace TonyMods
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             SceneManager.activeSceneChanged += SceneChanged;
             StartCoroutine(Localize());
-            log.LogInfo("Tidefork enabled: item 47940, price 1, host-authoritative summons, 8 maximum, 120 seconds.");
+            log.LogInfo("Tidefork enabled: item 47940, price 1, host-authoritative summons, no room cap or lifetime, " + TideRules.Health + " HP.");
         }
         private void Patch(Type type, string method, string prefix)
         {
@@ -77,13 +81,14 @@ namespace TonyMods
             {
                 Disconnect(); network = current;
                 network.CustomMessagingManager.RegisterNamedMessageHandler(Channel, Receive);
-                nextSend = nextHello = 0;
+                lastSend = -1; nextHello = 0;
             }
-            foreach (ulong id in creatures.Keys.ToArray()) if (creatures[id] == null) creatures.Remove(id);
+            foreach (ulong id in creatures.Keys.ToArray()) if (creatures[id] == null) { creatures.Remove(id); dirty = true; }
             if (network.IsServer)
             {
-                // Clients extrapolate from action start times; send on every action change plus a heartbeat.
-                if (Time.unscaledTime >= nextSend) { nextSend = Time.unscaledTime + .5f; Broadcast(); }
+                // Clients extrapolate from action start times: send action changes (at most 10/s) plus a heartbeat.
+                float since = Time.unscaledTime - lastSend;
+                if (lastSend < 0 || since >= .5f || dirty && since >= .1f) Broadcast();
             }
             else
             {
@@ -166,8 +171,8 @@ namespace TonyMods
             if (!PlayerManager.Instance.players.TryGetValue(sender, out player) || player == null ||
                 !ContainerManager.Instance.GetPlayerContainer(sender, out owned) || !container.GetItemById(itemId, out item, true)) return;
             double last; if (!uses.TryGetValue(sender, out last)) last = Now - 2;
-            if (!TideRules.CanUse(true, player.IsSpawned && player.hp.Value > 0, container == owned, item.dataId, item.amount, creatures.Count, Now - last))
-            { Note(sender, "無法召喚：請稍候，或等待現有叉潮像消失（全場最多 8 隻）。"); return; }
+            if (!TideRules.CanUse(true, player.IsSpawned && player.hp.Value > 0, container == owned, item.dataId, item.amount, Now - last))
+            { Note(sender, "無法召喚：每次召喚需間隔 1 秒。"); return; }
             foreach (ulong peer in network.ConnectedClientsIds)
             {
                 float seen;
@@ -244,8 +249,19 @@ namespace TonyMods
         private void Broadcast()
         {
             if (network == null || !network.IsServer) return;
-            string json = HorseJson.Serialize(new Snapshot { records = creatures.Values.Where(c => c != null).Select(c => c.State).ToArray() });
-            foreach (ulong id in network.ConnectedClientsIds) if (id != network.LocalClientId && peers.ContainsKey(id)) Send(id, json);
+            lastSend = Time.unscaledTime; dirty = false;
+            ulong[] targets = network.ConnectedClientsIds.Where(id => id != network.LocalClientId && peers.ContainsKey(id)).ToArray();
+            if (targets.Length == 0) return;
+            // Chunks stay a few KB so no packet exceeds the transport's max payload, however many idols exist.
+            Record[] records = creatures.Values.Where(c => c != null).Select(c => c.State).ToArray();
+            int parts = Math.Max(1, (records.Length + ChunkSize - 1) / ChunkSize);
+            sequence = sequence == int.MaxValue ? 0 : sequence + 1;
+            for (int part = 0; part < parts; part++)
+            {
+                string json = HorseJson.Serialize(new Snapshot { sequence = sequence, part = part, parts = parts,
+                    records = records.Skip(part * ChunkSize).Take(ChunkSize).ToArray() });
+                foreach (ulong id in targets) Send(id, json);
+            }
         }
         private void Receive(ulong sender, FastBufferReader reader)
         {
@@ -259,26 +275,39 @@ namespace TonyMods
                 if (message.StartsWith("note:", StringComparison.Ordinal)) { Tell(message.Substring(5)); return; }
                 Snapshot snapshot = HorseJson.Deserialize<Snapshot>(message);
                 if (!Valid(snapshot)) return;
-                pending.Clear(); foreach (Record record in snapshot.records) pending.Add(record.id, record);
-                foreach (ulong id in creatures.Keys.ToArray()) if (!pending.ContainsKey(id))
-                { if (creatures[id] != null) creatures[id].Hide(); creatures.Remove(id); }
+                Accept(snapshot);
             }
             catch (Exception ex) { log.LogWarning("Tidefork packet rejected: " + ex.Message); }
         }
+        // Parts arrive in order (ReliableFragmentedSequenced); apply only a complete, consistent set.
+        private void Accept(Snapshot snapshot)
+        {
+            if (snapshot.part == 0) { incoming.Clear(); incomingSequence = snapshot.sequence; incomingPart = 0; }
+            if (snapshot.sequence != incomingSequence || snapshot.part != incomingPart) { incomingSequence = -1; return; }
+            foreach (Record record in snapshot.records)
+                if (incoming.ContainsKey(record.id)) { incomingSequence = -1; return; } else incoming.Add(record.id, record);
+            incomingPart++;
+            if (incomingPart < snapshot.parts) return;
+            pending.Clear(); foreach (var pair in incoming) pending.Add(pair.Key, pair.Value);
+            incoming.Clear(); incomingSequence = -1;
+            foreach (ulong id in creatures.Keys.ToArray()) if (!pending.ContainsKey(id))
+            { if (creatures[id] != null) creatures[id].Hide(); creatures.Remove(id); }
+        }
         private static bool Valid(Snapshot snapshot)
         {
-            if (snapshot == null || snapshot.version != 1 || snapshot.records == null || snapshot.records.Length > TideRules.Limit) return false;
+            if (snapshot == null || snapshot.version != 2 || snapshot.records == null || snapshot.records.Length > ChunkSize ||
+                snapshot.parts < 1 || snapshot.parts > MaxParts || snapshot.part < 0 || snapshot.part >= snapshot.parts) return false;
             var ids = new HashSet<ulong>();
             foreach (Record r in snapshot.records)
             {
                 if (r == null || !ids.Add(r.id) || r.action > TideRules.Death || String.IsNullOrEmpty(r.scene) || r.scene.Length > 128 ||
-                    !TideRules.Finite(r.started) || !TideRules.Finite(r.born) || r.started < r.born || r.started > Now + 5 || Now - r.born > 140) return false;
+                    !TideRules.Finite(r.started) || !TideRules.Finite(r.born) || r.started < r.born || r.started > Now + 5) return false;
                 foreach (float v in new[] { r.from.x, r.from.y, r.from.z, r.landing.x, r.landing.y, r.landing.z })
                     if (!TideRules.Finite(v) || Math.Abs(v) > 100000) return false;
             }
             return true;
         }
-        internal void Changed() { nextSend = 0; }
+        internal void Changed() { dirty = true; }
         internal void Remove(TideCreature creature)
         {
             creatures.Remove(creature.State.id); Changed();
@@ -289,7 +318,7 @@ namespace TonyMods
         {
             foreach (TideCreature creature in creatures.Values.ToArray()) if (creature != null)
             { if (despawn && network != null && network.IsServer) Remove(creature); else creature.Hide(); }
-            creatures.Clear(); pending.Clear(); uses.Clear();
+            creatures.Clear(); pending.Clear(); uses.Clear(); incoming.Clear(); incomingSequence = -1;
         }
         private void Disconnect()
         {
@@ -308,8 +337,8 @@ namespace TonyMods
             if (handle.Result == null) yield break;
             bool zh = LocalizationSettings.SelectedLocale != null && LocalizationSettings.SelectedLocale.Identifier.Code.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
             string[] keys = { "TonyTideName", "TonyTideDescription", "TonyTideUse" };
-            string[] values = zh ? new[] { "叉潮封印球", "向前投出封印球，召喚會攻擊所有玩家（包含自己）的叉潮像。可擊殺；120 秒消失；全場最多 8 隻。所有玩家需安裝相同版本。", "投擲召喚叉潮像" } :
-                new[] { "Tidefork Seal", "Throw forward to summon a hostile Tidefork Idol. Attacks everyone, including you. Killable; lasts 120 seconds; room limit 8. All players need the same mod version.", "Throw and summon Tidefork Idol" };
+            string[] values = zh ? new[] { "叉潮封印球", "向前投出封印球，召喚會攻擊所有玩家（包含自己）的叉潮像。1000 HP，不會自行消失，需擊殺才會離開；讀檔或換場景時清除。所有玩家需安裝相同版本。", "投擲召喚叉潮像" } :
+                new[] { "Tidefork Seal", "Throw forward to summon a hostile Tidefork Idol. Attacks everyone, including you. 1000 HP; stays until killed, cleared on load or scene change. All players need the same mod version.", "Throw and summon Tidefork Idol" };
             for (int i = 0; i < keys.Length; i++) { var entry = handle.Result.GetEntry(keys[i]); if (entry == null) handle.Result.AddEntry(keys[i], values[i]); else entry.Value = values[i]; }
             var titles = LocalizationSettings.StringDatabase.GetTableAsync("Interactive"); yield return titles;
             if (titles.Result != null)

@@ -57,9 +57,9 @@ namespace TonyMods
                 agent.enabled = true;
                 if (!Place(record.landing)) throw new InvalidOperationException("Cannot place native agent on navigation mesh");
                 agent.radius = TideRules.Radius; agent.height = 2.8f;
-                agent.speed = 2.1f; agent.acceleration = 7; agent.angularSpeed = 160;
-                agent.stoppingDistance = 1.65f; agent.autoBraking = true; agent.isStopped = true;
-                nextWave = record.born + TideRules.Duration(TideRules.Summon) + 6;
+                agent.speed = TideRules.Speed; agent.acceleration = TideRules.Acceleration; agent.angularSpeed = TideRules.TurnSpeed;
+                agent.stoppingDistance = TideRules.StopDistance; agent.autoBraking = true; agent.isStopped = true;
+                nextWave = record.born + TideRules.Duration(TideRules.Summon) + TideRules.FirstWaveDelay;
                 lastHostClock = TideSummons.Now;
             }
             else agent.enabled = false;
@@ -116,7 +116,7 @@ namespace TonyMods
                 return;
             }
             double elapsed = now - State.started;
-            if (State.action != TideRules.Death && (vulnerable.hp.Value == 0 || now - State.born >= TideRules.Lifetime)) Enter(TideRules.Death);
+            if (State.action != TideRules.Death && vulnerable.hp.Value == 0) Enter(TideRules.Death);
             if (State.action == TideRules.Death)
             {
                 Stop(); vulnerable.invinsible.Value = true;
@@ -142,16 +142,16 @@ namespace TonyMods
             if (target == null) { Stop(); return; }
             Vector3 delta = target.transform.position - transform.position; delta.y = 0;
             float distance = delta.magnitude;
-            if (distance <= 2.15f && ClearSight(target))
+            if (distance <= TideRules.EngageDistance && ClearSight(target))
             {
                 Stop(); if (distance > .01f) transform.rotation = Quaternion.LookRotation(delta);
-                byte action = now >= nextWave ? TideRules.Wave : distance < 1.45f ? TideRules.Sweep : TideRules.Bite;
-                if (action == TideRules.Wave) nextWave = now + 10;
+                byte action = now >= nextWave ? TideRules.Wave : distance < TideRules.SweepDistance ? TideRules.Sweep : TideRules.Bite;
+                if (action == TideRules.Wave) nextWave = now + TideRules.WaveCooldown;
                 Enter(action); return;
             }
             if (now >= nextPath)
             {
-                nextPath = now + .3;
+                nextPath = now + TideRules.RepathInterval;
                 NavMeshHit nav;
                 if (NavMesh.SamplePosition(target.transform.position, out nav, 1, agent.areaMask))
                 { agent.isStopped = false; agent.SetDestination(nav.position); }
@@ -168,11 +168,11 @@ namespace TonyMods
         private PlayerNet Nearest()
         {
             if (PlayerManager.Instance == null) return null;
-            PlayerNet best = null; float nearest = 30 * 30;
+            PlayerNet best = null; float nearest = TideRules.SearchRadius * TideRules.SearchRadius;
             foreach (PlayerNet player in PlayerManager.Instance.players.Values)
             {
                 if (player == null || !player.IsSpawned || player.hp.Value <= 0 || player.isDespawning || player.isInvisible.Value) continue;
-                if (Math.Abs(player.transform.position.y - transform.position.y) > 4) continue;
+                if (Math.Abs(player.transform.position.y - transform.position.y) > TideRules.SearchHeight) continue;
                 float distance = (player.transform.position - transform.position).sqrMagnitude;
                 if (distance < nearest) { nearest = distance; best = player; }
             }

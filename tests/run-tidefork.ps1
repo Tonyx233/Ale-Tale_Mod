@@ -39,6 +39,9 @@ try {
  if(!($mod.MainModule.Resources|Where-Object Name -eq 'Tony.Tidefork.model.json')){throw 'Missing Tidefork model'}; $count++
  foreach($name in @('TideSummons','TideCreature','TideModel','TideRules','M4Armory','HorseStable','ChestQuickStack','YouTubeJukeboxPanel','ItemStacks')){[void](TypeDef $mod $name);$count++}
  $manager=TypeDef $mod 'TideSummons';$creature=TypeDef $mod 'TideCreature'
+ if(@((TypeDef $mod 'TideRules').Fields | Where-Object { $_.Name -in 'Limit','Lifetime' }).Count){throw 'Room cap and lifetime must stay removed'}; $count++
+ $broadcast=Calls (Method $manager 'Broadcast' '')
+ if($broadcast -notmatch 'Enumerable::Take'){throw 'Snapshots must be chunked for unbounded idol counts'}; $count++
  if($creature.BaseType.Name -ne 'MonoBehaviour'){throw 'Do not append a NetworkBehaviour to native prefab'}; $count++
  $use=Calls (Method $manager 'Throw' 'ContainerNet,UInt32,UInt64')
  foreach($pattern in @('get_IsServer','TideRules::CanUse','HasConnectingClients','TideSummons::Landing','TideCreature::Initialize','ContainerNet::RemoveItemAmount')) {
