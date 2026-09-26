@@ -15,8 +15,12 @@ namespace TonyMods
         private readonly List<Material> materials = new List<Material>();
         private Transform orb;
         private LineRenderer effect, warning;
-        private Material glow;
+        private Material glow, water;
         private readonly List<Transform> droplets = new List<Transform>();
+        // 潮彈 visuals are placed in world space: the idol walks on while its shell is still in the air.
+        private Transform shell;
+        private LineRenderer shellTrail, shellMark, shellTimer, shellBurst;
+        private readonly List<Transform> spray = new List<Transform>();
         private float gait;
         internal static TideModel Create(Transform parent)
         {
@@ -70,19 +74,29 @@ namespace TonyMods
             orb = ball.transform; orb.SetParent(transform, false); orb.localScale = Vector3.one * .27f;
             Shader fxShader = Shader.Find("Sprites/Default") ?? Shader.Find("Universal Render Pipeline/Unlit") ?? shader;
             glow = new Material(fxShader); glow.SetColor("_Color", new Color(.15f, .9f, 1)); glow.SetColor("_BaseColor", new Color(.15f, .9f, 1));
-            effect = MakeLine("Tidefork attack water", .055f); warning = MakeLine("Tidefork telegraph", .022f);
-            for (int i = 0; i < 12; i++)
-            {
-                GameObject drop = GameObject.CreatePrimitive(PrimitiveType.Sphere); drop.name = "Tidefork water droplet " + i;
-                DestroyImmediate(drop.GetComponent<Collider>()); drop.GetComponent<MeshRenderer>().sharedMaterial = materials[3];
-                drop.transform.SetParent(transform, false); drop.transform.localScale = Vector3.one * .035f;
-                droplets.Add(drop.transform); drop.SetActive(false);
-            }
+            effect = MakeLine("Tidefork attack water", .055f, false); warning = MakeLine("Tidefork telegraph", .022f, false);
+            for (int i = 0; i < 12; i++) droplets.Add(Drop("Tidefork water droplet " + i, materials[3], .035f));
+            water = new Material(shader); water.name = "Tidefork shell water";
+            water.SetColor("_Color", new Color(.25f, .78f, .9f)); water.SetColor("_BaseColor", new Color(.25f, .78f, .9f));
+            water.SetFloat("_Metallic", 0); water.SetFloat("_Smoothness", .85f);
+            water.EnableKeyword("_EMISSION"); water.SetColor("_EmissionColor", new Color(.1f, .75f, .9f) * 1.3f);
+            shell = Drop("Tidefork shell", water, .36f);
+            shellTrail = MakeLine("Tidefork shell trail", .12f, true); shellTrail.endWidth = .02f; shellTrail.endColor = new Color(.12f, .86f, .95f, 0);
+            shellMark = MakeLine("Tidefork shell landing", .03f, true); shellTimer = MakeLine("Tidefork shell timer", .05f, true);
+            shellBurst = MakeLine("Tidefork shell splash", .07f, true);
+            for (int i = 0; i < 10; i++) spray.Add(Drop("Tidefork shell spray " + i, water, .06f));
         }
-        private LineRenderer MakeLine(string name, float width)
+        private Transform Drop(string name, Material material, float size)
+        {
+            GameObject drop = GameObject.CreatePrimitive(PrimitiveType.Sphere); drop.name = name;
+            DestroyImmediate(drop.GetComponent<Collider>()); drop.GetComponent<MeshRenderer>().sharedMaterial = material;
+            drop.transform.SetParent(transform, false); drop.transform.localScale = Vector3.one * size;
+            drop.SetActive(false); return drop.transform;
+        }
+        private LineRenderer MakeLine(string name, float width, bool world)
         {
             var go = new GameObject(name); go.transform.SetParent(transform, false);
-            var line = go.AddComponent<LineRenderer>(); line.sharedMaterial = glow; line.useWorldSpace = false;
+            var line = go.AddComponent<LineRenderer>(); line.sharedMaterial = glow; line.useWorldSpace = world;
             line.startWidth = line.endWidth = width; line.startColor = line.endColor = new Color(.12f, .86f, .95f, .85f);
             line.enabled = false; return line;
         }
@@ -132,7 +146,7 @@ namespace TonyMods
                 drop.localPosition = center + new Vector3(Mathf.Sin(a) * radius, (action == TideRules.Wave ? .1f : 1.2f) + t * 2 - t * t * 4, Mathf.Cos(a) * radius);
                 drop.localScale = Vector3.one * (.04f * Mathf.Clamp01(1 - t / .65f));
             }
-            materials[3].SetColor("_EmissionColor", new Color(.06f, .7f, .8f) * (action == TideRules.Wave ? .3f + charge * 3 : .18f));
+            materials[3].SetColor("_EmissionColor", new Color(.06f, .7f, .8f) * (action == TideRules.Wave || action == TideRules.Shot ? .3f + charge * 3 : .18f));
             if (action == TideRules.Bite)
             {
                 torso.localRotation = Quaternion.Euler(-charge * 7, 90 * Mathf.Clamp01(age / (windup * .6f)), 0);
@@ -156,11 +170,61 @@ namespace TonyMods
                 if (release < 0) Ring(warning, TideRules.WaveRadius, .04f, 0, 360);
                 if (release >= 0 && release < .6f) Ring(effect, Mathf.Lerp(.5f, TideRules.WaveRadius, Mathf.Clamp01(release / .4f)), .1f, 0, 360);
             }
+            else if (action == TideRules.Shot)
+            {
+                // Rears back while the shell gathers over the crown, pitches forward on the throw, settles to walk.
+                float strike = TideRules.Strike(action), throwing = Mathf.Clamp01(release / strike);
+                float settle = Mathf.Clamp01((release - strike) / (TideRules.Duration(action) - windup - strike));
+                torso.localRotation = Quaternion.Euler(release < 0 ? -10 * charge : Mathf.Lerp(-10, 8, throwing) * (1 - settle), 0, 0);
+                bones["crown"].localScale = new Vector3(1 + (release < 0 ? charge : 1 - throwing) * .15f, 1, 1);
+            }
             else if (action == TideRules.Summon && !flight) Ring(effect, .9f * rise, .045f, 0, 360);
             if (dying > 0)
             { bones["crown"].localScale = new Vector3(1 - dying * .7f, 1, 1); materials[3].SetColor("_EmissionColor", Color.black); materials[5].SetColor("_EmissionColor", new Color(1,.5f,.08f) * (1 - dying)); }
         }
+        // since = seconds after release: negative while the shell gathers above the crown, NaN when there is none.
+        internal void Shell(float since, Vector3 from, Vector3 to, float flight, float apex)
+        {
+            float windup = TideRules.Windup(TideRules.Shot);
+            bool gathering = since >= -windup && since < 0, flying = since >= 0 && since < flight;
+            bool bursting = since >= flight && since < flight + TideRules.ShotSplash;
+            shell.gameObject.SetActive(gathering || flying);
+            shellTrail.enabled = flying; shellMark.enabled = shellTimer.enabled = gathering || flying; shellBurst.enabled = bursting;
+            if (gathering || flying)
+            {
+                shell.position = flying ? TideSummons.Arc(from, to, since / flight, apex) : from;
+                shell.localScale = Vector3.one * (.36f * Mathf.Clamp01((since + windup) / windup));
+                // The inner ring reaches the drawn edge exactly when the shell lands.
+                WorldRing(shellMark, to, TideRules.ShotRing);
+                WorldRing(shellTimer, to, TideRules.ShotRing * Mathf.Clamp01((since + windup) / (windup + flight)));
+            }
+            if (flying)
+            {
+                float phase = since / flight;
+                shellTrail.positionCount = 8;
+                for (int i = 0; i < 8; i++) shellTrail.SetPosition(i, TideSummons.Arc(from, to, Mathf.Max(0, phase - i * .03f), apex));
+            }
+            float t = since - flight;
+            if (bursting) WorldRing(shellBurst, to, Mathf.Lerp(.3f, TideRules.ShotRing, Mathf.Clamp01(t / .35f)));
+            for (int i = 0; i < spray.Count; i++)
+            {
+                Transform drop = spray[i]; drop.gameObject.SetActive(bursting);
+                if (!bursting) continue;
+                float a = i * 2.39996f, radius = .2f + t * 3.2f;
+                drop.position = to + new Vector3(Mathf.Sin(a) * radius, .1f + t * 3 - t * t * 5, Mathf.Cos(a) * radius);
+                drop.localScale = Vector3.one * (.06f * Mathf.Clamp01(1 - t / TideRules.ShotSplash));
+            }
+        }
+        private static void WorldRing(LineRenderer line, Vector3 center, float radius)
+        {
+            line.positionCount = 49;
+            for (int i = 0; i < 49; i++) { float a = i / 48f * Mathf.PI * 2; line.SetPosition(i, center + new Vector3(Mathf.Sin(a) * radius, .06f, Mathf.Cos(a) * radius)); }
+        }
         private void OnDestroy()
-        { foreach (Mesh mesh in meshes) if (mesh != null) Destroy(mesh); foreach (Material material in materials) if (material != null) Destroy(material); if (glow != null) Destroy(glow); }
+        {
+            foreach (Mesh mesh in meshes) if (mesh != null) Destroy(mesh);
+            foreach (Material material in materials) if (material != null) Destroy(material);
+            if (glow != null) Destroy(glow); if (water != null) Destroy(water);
+        }
     }
 }

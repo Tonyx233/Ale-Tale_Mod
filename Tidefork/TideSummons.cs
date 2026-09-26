@@ -17,9 +17,11 @@ namespace TonyMods
 {
     public sealed class TideSummons : MonoBehaviour
     {
-        // v2: snapshots are split into ChunkSize-record parts because the idol count is unbounded.
-        private const string Channel = "Tony.Tidefork.v2";
-        private const int ChunkSize = 12, MaxParts = 1000;
+        // v3 adds the 潮彈 shell. Snapshots are split into ChunkSize-record parts because the idol count is
+        // unbounded; strings travel as UTF-16, and tests/run-tidefork.ps1 keeps a worst-case part under
+        // UnityTransport's 6144-byte payload.
+        private const string Channel = "Tony.Tidefork.v3";
+        private const int ChunkSize = 5, MaxParts = 1000;
         private static TideSummons instance;
         private ManualLogSource log;
         private Harmony patches;
@@ -42,8 +44,12 @@ namespace TonyMods
             public byte action;
             public double started, born;
             public Vector3 from, landing;
+            // Current shell: release time (0 = none), flight seconds, arc apex, launch and landing points.
+            public double shotAt;
+            public float shotFlight, shotApex;
+            public Vector3 shotFrom, shotTo;
         }
-        [Serializable] public sealed class Snapshot { public int version = 2, sequence, part, parts; public Record[] records; }
+        [Serializable] public sealed class Snapshot { public int version = 3, sequence, part, parts; public Record[] records; }
         internal static double Now { get { return NetworkManager.Singleton == null ? 0 : NetworkManager.Singleton.ServerTime.Time; } }
         internal static bool Owned(Component component) { return component != null && component.GetComponentInParent<TideCreature>() != null; }
 
@@ -62,7 +68,7 @@ namespace TonyMods
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             SceneManager.activeSceneChanged += SceneChanged;
             StartCoroutine(Localize());
-            log.LogInfo("Tidefork enabled: item 47940, price 1, host-authoritative summons, no room cap or lifetime, " + TideRules.Health + " HP.");
+            log.LogInfo("Tidefork enabled: item 47940, price 1, host-authoritative summons, no room cap or lifetime, " + TideRules.Health + " HP, water shell " + TideRules.ShotMin + "-" + TideRules.ShotMax + " m.");
         }
         private void Patch(Type type, string method, string prefix)
         {
@@ -238,8 +244,9 @@ namespace TonyMods
             }
             return true;
         }
-        internal static Vector3 Arc(Vector3 from, Vector3 to, float phase)
-        { return Vector3.Lerp(from, to, phase) + Vector3.up * (4 * phase * (1 - phase) * 1.1f); }
+        internal static Vector3 Arc(Vector3 from, Vector3 to, float phase) { return Arc(from, to, phase, 1.1f); }
+        internal static Vector3 Arc(Vector3 from, Vector3 to, float phase, float apex)
+        { return Vector3.Lerp(from, to, phase) + Vector3.up * TideRules.ArcLift(phase, apex); }
         private void Send(ulong id, string message)
         {
             if (network == null || !network.IsListening) return;
@@ -295,14 +302,17 @@ namespace TonyMods
         }
         private static bool Valid(Snapshot snapshot)
         {
-            if (snapshot == null || snapshot.version != 2 || snapshot.records == null || snapshot.records.Length > ChunkSize ||
+            if (snapshot == null || snapshot.version != 3 || snapshot.records == null || snapshot.records.Length > ChunkSize ||
                 snapshot.parts < 1 || snapshot.parts > MaxParts || snapshot.part < 0 || snapshot.part >= snapshot.parts) return false;
             var ids = new HashSet<ulong>();
+            double now = Now;
             foreach (Record r in snapshot.records)
             {
-                if (r == null || !ids.Add(r.id) || r.action > TideRules.Death || String.IsNullOrEmpty(r.scene) || r.scene.Length > 128 ||
-                    !TideRules.Finite(r.started) || !TideRules.Finite(r.born) || r.started < r.born || r.started > Now + 5) return false;
-                foreach (float v in new[] { r.from.x, r.from.y, r.from.z, r.landing.x, r.landing.y, r.landing.z })
+                if (r == null || !ids.Add(r.id) || r.action > TideRules.Shot || String.IsNullOrEmpty(r.scene) || r.scene.Length > TideRules.SceneNameMax ||
+                    !TideRules.Finite(r.started) || !TideRules.Finite(r.born) || r.started < r.born || r.started > now + 5 ||
+                    !TideRules.ValidShot(r.shotAt, r.shotFlight, r.shotApex, r.born, now)) return false;
+                foreach (float v in new[] { r.from.x, r.from.y, r.from.z, r.landing.x, r.landing.y, r.landing.z,
+                    r.shotFrom.x, r.shotFrom.y, r.shotFrom.z, r.shotTo.x, r.shotTo.y, r.shotTo.z })
                     if (!TideRules.Finite(v) || Math.Abs(v) > 100000) return false;
             }
             return true;

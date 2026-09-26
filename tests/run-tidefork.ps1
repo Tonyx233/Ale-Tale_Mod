@@ -29,9 +29,17 @@ try {
  }
  foreach($api in @(@('SpawnManager','ManualSpawn','Type,Vector3,Quaternion,Spawnable&,Boolean'),@('SpawnManager','RemoveById','UInt16,Boolean'),
   @('PlayerNet','HitClientRpc','Int16,Vector3,Single,Boolean,EffectType'),@('Vulnerable','SetHpMax','UInt16'),
-  @('ContainerNet','RemoveItemAmount','UInt32,UInt16'),@('Master','HasConnectingClients',''))) {
+  @('ContainerNet','RemoveItemAmount','UInt32,UInt16'),@('Master','HasConnectingClients',''),
+  @('PlayerNet','HitEffectClientRpc','EffectType,Int32,Byte,Vector3,Single,Boolean'),@('EffectsController','AddEffectServerRpc','EffectType,Single,Int32,ServerRpcParams'))) {
   [void](Method (TypeDef $game $api[0]) $api[1] $api[2])
  }
+ # 潮彈 slow: the owner's effect RPC must add a native effect that replaces (not stacks) and lowers move speed.
+ $effectRpc=Calls (Method (TypeDef $game 'PlayerNet') 'HitEffectClientRpc' $null)
+ if($effectRpc -notmatch [regex]::Escape('EffectsController::AddEffectServerRpc(EffectsController/EffectType,System.Single,System.Int32')){throw 'Native hit effect RPC changed'}; $count++
+ $addEffect=Calls (Method (TypeDef $game 'EffectsController') 'AddEffectServerRpc' 'EffectType,Single,Int32,ServerRpcParams')
+ if($addEffect -notmatch 'EffectsController::RemoveSameTypeEffect'){throw 'Native effects now stack; the shell slow would compound'}; $count++
+ $newEffect=Calls (Method (TypeDef $game 'EffectsController') 'OnNewEffectAdded' $null)
+ if($newEffect -notmatch 'PlayerNet::IncreaseSpeedPercentage'){throw 'Native slow no longer lowers move speed'}; $count++
  $spawn = Calls (Method (TypeDef $game 'SpawnManager') 'ManualSpawn' $null)
  if($spawn -notmatch 'NetworkObject::Spawn' -or $spawn -notmatch '_manualSpawn'){throw 'Native spawn lifecycle changed'}; $count++
  $gun=Calls (Method (TypeDef $game 'GunTool') 'RaycastShot' '')
@@ -53,9 +61,32 @@ try {
  # ServerClientId is compiled as the constant zero; require the sender==0 guard before deserialization.
  if($receive -notmatch '(?s)ldarg\.1\s+IL_\w+: ldc\.i4\.0\s+IL_\w+: conv\.i8\s+IL_\w+: beq.*leave'){throw 'Missing host-only sender comparison'};$count++
  $tick=Calls (Method $creature 'Tick' '')
- foreach($pattern in @('get_IsServer','TideRules::CrossedHit','TideCreature::Strike')){if($tick -notmatch [regex]::Escape($pattern)){throw "Missing combat gate $pattern"};$count++}
+ foreach($pattern in @('get_IsServer','TideRules::CrossedHit','TideCreature::Strike','TideRules::ShotDue','TideCreature::Splash','TideRules::InShotRange','TideCreature::Fire','NavMeshPathStatus')){if($tick -notmatch [regex]::Escape($pattern)){throw "Missing combat gate $pattern"};$count++}
  $strike=Calls (Method $creature 'Strike' 'Byte')
  foreach($pattern in @('TideRules::InHit','TideCreature::ClearSight','PlayerNet::HitClientRpc')){if($strike -notmatch [regex]::Escape($pattern)){throw "Missing hit gate $pattern"};$count++}
+ $splash=Calls (Method $creature 'Splash' '')
+ foreach($pattern in @('TideRules::InSplash','TideCreature::Blocked','PlayerNet::HitClientRpc','PlayerNet::HitEffectClientRpc')){if($splash -notmatch [regex]::Escape($pattern)){throw "Missing shell hit gate $pattern"};$count++}
+ $fire=Calls (Method $creature 'Fire' 'PlayerNet,Vector3,Double')
+ foreach($pattern in @('TideRules::InShotRange','TideCreature::Ground','TideCreature::ClearArc','TideSummons/Record::shotAt','TideCreature::Enter')){if($fire -notmatch [regex]::Escape($pattern)){throw "Missing shell plan gate $pattern"};$count++}
+ if($fire.IndexOf('Record::shotAt') -gt $fire.IndexOf('TideCreature::Enter')){throw 'Shell fields must be set before the action snapshot is marked'}; $count++
+ if((Calls (Method $creature 'Enter' 'Byte')) -notmatch [regex]::Escape('TideSummons/Record::shotAt')){throw 'Death must cancel a shell in the air'}; $count++
+ $sceneMax=((TypeDef $mod 'TideRules').Fields | Where-Object Name -eq 'SceneNameMax').Constant
+ $valid=Calls (Method $manager 'Valid' 'Snapshot')
+ if($valid -notmatch [regex]::Escape('TideRules::ValidShot')){throw 'Missing shell protocol gate'}; $count++
+ # SceneNameMax is a constant, so Valid carries its inlined value.
+ if($valid -notmatch "ldc\.i4\.s $sceneMax\b"){throw 'Scene name bound missing'}; $count++
+ if((Calls (Method $manager 'Update' '')) -notmatch 'Tony\.Tidefork\.v3'){throw 'Shell snapshots need their own channel version'}; $count++
+ # Snapshot parts travel as UTF-16 (FastBufferWriter.WriteValueSafe(string) writes two bytes per char). A part
+ # of ChunkSize worst-case records must fit UnityTransport's 6144-byte payload used by the LAN/relay managers.
+ $widest=@{UInt64=20;Byte=3;Int32=11;Double=24;Single=15;Vector3=61;String=2+$sceneMax}
+ function Width($fields){ $chars=2+$fields.Count-1; foreach($f in $fields){ if(!$widest.ContainsKey($f.FieldType.Name)){throw "No JSON width for $($f.FieldType.Name)"}; $chars+=$f.Name.Length+3+$widest[$f.FieldType.Name] }; $chars }
+ $record=Width @(($manager.NestedTypes | Where-Object Name -eq 'Record').Fields | Where-Object { $_.IsPublic -and !$_.IsStatic })
+ $chunk=($manager.Fields | Where-Object Name -eq 'ChunkSize').Constant
+ $scalars=@(($manager.NestedTypes | Where-Object Name -eq 'Snapshot').Fields | Where-Object { $_.IsPublic -and !$_.IsStatic -and $_.Name -ne 'records' })
+ $partChars=(Width $scalars)+1+'"records":[]'.Length+$chunk*$record+$chunk-1
+ $partBytes=4+2*$partChars+64
+ if($partBytes -gt 6144){throw "Worst-case snapshot part is $partBytes bytes; lower ChunkSize"}; $count++
+ "Worst-case snapshot part: $chunk records, $partBytes of 6144 bytes"
  $init=Calls (Method (TypeDef $mod 'TeammateHealthBars') 'Awake' '')
  if($init -notmatch 'TideSummons::Initialize'){throw 'Module not initialized'};$count++
  $version=(Get-Content (Join-Path $root 'version.txt') -Raw).Trim()
