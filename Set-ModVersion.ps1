@@ -11,7 +11,7 @@ $dll=Join-Path $temp 'TONY_BIG_SET.dll'
 using System.Reflection;
 [assembly: AssemblyTitle("Tony Ale & Tale Mods")]
 [assembly: AssemblyProduct("Tony Ale & Tale Mods")]
-[assembly: AssemblyDescription("Health panel, YouTube jukebox, two/five-seat horses, musket scope, chest quick stack and M4A1 rifle with interchangeable optics")]
+[assembly: AssemblyDescription("Health panel, YouTube jukebox, two/five-seat horses, musket scope, chest quick stack, M4A1 rifle with interchangeable optics and Tidefork summons")]
 [assembly: AssemblyCompany("Tony")]
 [assembly: AssemblyVersion("$version.0")]
 [assembly: AssemblyFileVersion("$version.0")]
