@@ -2,13 +2,22 @@ using System;
 
 namespace TonyMods
 {
+    // Aim opens the first stage, each press advances, and a press on the last stage closes.
     internal sealed class ScopeCycle
     {
-        public int Magnification { get; private set; }
-        public bool IsActive { get { return Magnification > 1; } }
-        public ScopeCycle() { Reset(); }
-        public void Advance() { Magnification = Magnification == 1 ? 3 : Magnification == 3 ? 6 : 1; }
-        public void Reset() { Magnification = 1; }
+        private readonly int[] stages;
+        private int index = -1;
+        public ScopeCycle() : this(3, 6) { }
+        public ScopeCycle(params int[] stages)
+        {
+            if (stages == null || stages.Length == 0) throw new ArgumentException("Scope needs at least one stage");
+            this.stages = (int[])stages.Clone();
+        }
+        public int Magnification { get { return index < 0 ? 1 : stages[index]; } }
+        public bool IsActive { get { return index >= 0; } }
+        public bool IsLastStage { get { return index == stages.Length - 1; } }
+        public void Advance() { index = index + 1 >= stages.Length ? -1 : index + 1; }
+        public void Reset() { index = -1; }
     }
 
     internal static class ScopeMath

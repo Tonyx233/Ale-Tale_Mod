@@ -8,7 +8,8 @@ using UnityEngine;
 
 namespace TonyMods
 {
-    // Attached only to the native Musket_fp: Crossbow_fp also uses GunTool.
+    // Attached to the native Musket_fp (brass scope, 3x/6x) and to the M4A1 (built-in ACOG,
+    // single stage). Crossbow_fp also uses GunTool and stays unchanged.
     public sealed class MusketScope : MonoBehaviour
     {
         private const string PatchId = "Tony.MusketScope";
@@ -28,7 +29,8 @@ namespace TonyMods
         private Texture2D mask;
         private Renderer[] hiddenRenderers;
         private bool[] rendererStates;
-        private readonly ScopeCycle cycle = new ScopeCycle();
+        private ScopeCycle cycle = new ScopeCycle();
+        private bool rifle;
         private bool aiming { get { return cycle.IsActive; } }
         private bool failed;
         private GUIStyle zoomLabel;
@@ -46,7 +48,7 @@ namespace TonyMods
                 Patch("RaycastShot", "BeforeRaycast", true);
                 harmony.Patch(AccessTools.Method(typeof(GunTool), "RaycastShot"), finalizer: new HarmonyMethod(typeof(MusketScope), "AfterRaycast"));
                 harmony.Patch(AccessTools.Method(typeof(PlayerInput), "GetLookInput"), postfix: new HarmonyMethod(typeof(MusketScope), "ScaleLook"));
-                log.LogInfo("Musket scope ready: physical brass scope + 3x / 6x / off aim cycle; native shot spread preserved.");
+                log.LogInfo("Musket scope ready: physical brass scope + 3x / 6x / off aim cycle, M4A1 ACOG single stage; native shot spread preserved.");
             }
             catch { harmony.UnpatchSelf(); harmony = null; throw; }
         }
@@ -73,11 +75,17 @@ namespace TonyMods
             MusketScope scope = __instance.GetComponent<MusketScope>();
             if (scope == null)
             {
-                if (__instance.transform.Find(MountPath + "/" + MusketMesh) == null) return;
+                // The M4 is spawned from Musket_fp, so it must be checked before the musket mesh.
+                bool m4 = M4Armory.IsM4(__instance);
+                if (!m4 && __instance.transform.Find(MountPath + "/" + MusketMesh) == null) return;
                 scope = __instance.gameObject.AddComponent<MusketScope>();
-                scope.gun = __instance;
-                try { scope.BuildModel(); }
-                catch (Exception ex) { scope.Fail(ex); }
+                scope.gun = __instance; scope.rifle = m4;
+                scope.cycle = m4 ? new ScopeCycle(M4Armory.ScopePower) : new ScopeCycle(3, 6);
+                if (!m4)
+                {
+                    try { scope.BuildModel(); }
+                    catch (Exception ex) { scope.Fail(ex); }
+                }
             }
             if (scope.failed) return;
             try { scope.TickInput(); }
@@ -101,7 +109,7 @@ namespace TonyMods
             if (!PlayerInput.Instance.GetAimInputDown()) return;
             if (aiming)
             {
-                if (cycle.Magnification == 6) ExitAim();
+                if (cycle.IsLastStage) ExitAim();
                 else { cycle.Advance(); ApplyZoom(); }
             }
             else
@@ -178,6 +186,8 @@ namespace TonyMods
             if (model != null) model.SetActive(false);
             log.LogError("Musket scope disabled for this weapon: " + ex);
         }
+
+        internal static bool IsScoped(GunTool gun) { return active != null && active.gun == gun && active.aiming; }
 
         private static void ScaleLook(ref Vector2 __result)
         {
@@ -280,16 +290,51 @@ namespace TonyMods
             GUI.color = Color.white; GUI.DrawTexture(new Rect(x, y, side, side), mask);
             GUI.color = Color.black;
             float line = Mathf.Max(1, Screen.height / 720f), cx = Screen.width / 2f, cy = Screen.height / 2f;
-            GUI.DrawTexture(new Rect(cx - side * .46f, cy - line / 2, side * .92f, line), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(cx - line / 2, cy - side * .46f, line, side * .92f), Texture2D.whiteTexture);
-            GUI.color = new Color(.8f, .14f, .1f);
-            GUI.DrawTexture(new Rect(cx - line, cy - line, line * 2, line * 2), Texture2D.whiteTexture);
+            if (rifle) DrawAcog(cx, cy, side, line);
+            else
+            {
+                GUI.DrawTexture(new Rect(cx - side * .46f, cy - line / 2, side * .92f, line), Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(cx - line / 2, cy - side * .46f, line, side * .92f), Texture2D.whiteTexture);
+                GUI.color = new Color(.8f, .14f, .1f);
+                GUI.DrawTexture(new Rect(cx - line, cy - line, line * 2, line * 2), Texture2D.whiteTexture);
+            }
             if (zoomLabel == null) zoomLabel = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
             zoomLabel.fontSize = Mathf.RoundToInt(18 * line);
             zoomLabel.normal.textColor = Color.white;
             GUI.color = Color.white;
             GUI.Label(new Rect(cx - 50 * line, cy + side * .32f, 100 * line, 30 * line), cycle.Magnification + "x", zoomLabel);
             GUI.color = previous; GUI.depth = depth; GUI.matrix = matrix;
+        }
+
+        // TA31-style reticle: red chevron with its tip on the aim point, bullet-drop stadia below.
+        private void DrawAcog(float cx, float cy, float side, float line)
+        {
+            GUI.color = Color.black;
+            GUI.DrawTexture(new Rect(cx - line / 2, cy + side * .075f, line, side * .21f), Texture2D.whiteTexture);
+            float[] widths = { .09f, .07f, .055f, .04f };
+            string[] marks = { "4", "5", "6", "8" };
+            if (zoomLabel == null) zoomLabel = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
+            zoomLabel.fontSize = Mathf.RoundToInt(12 * line); zoomLabel.normal.textColor = Color.black;
+            for (int i = 0; i < widths.Length; i++)
+            {
+                float y = cy + side * (.11f + i * .055f), w = side * widths[i];
+                GUI.DrawTexture(new Rect(cx - w / 2, y - line / 2, w, line), Texture2D.whiteTexture);
+                GUI.Label(new Rect(cx + w / 2 + 2 * line, y - 9 * line, 20 * line, 18 * line), marks[i], zoomLabel);
+            }
+            Color red = new Color(.93f, .27f, .14f);
+            float arm = side * .045f, width = Mathf.Max(2, line * 2.4f);
+            Line(new Vector2(cx, cy), new Vector2(cx - arm * .62f, cy + arm), width, red);
+            Line(new Vector2(cx, cy), new Vector2(cx + arm * .62f, cy + arm), width, red);
+        }
+
+        private static void Line(Vector2 from, Vector2 to, float width, Color color)
+        {
+            Vector2 d = to - from;
+            Matrix4x4 matrix = GUI.matrix;
+            GUIUtility.RotateAroundPivot(Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg, from);
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(from.x, from.y - width / 2, d.magnitude, width), Texture2D.whiteTexture);
+            GUI.matrix = matrix;
         }
     }
 }
