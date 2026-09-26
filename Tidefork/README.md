@@ -1,4 +1,4 @@
-# 十魚架 — 0.17.1
+# 十魚架 — 0.17.2
 
 以天野裕夫的雕塑《十魚架》（平成元年 3 月）為原型的召喚怪物。程式內部名稱仍為 Tidefork（`Tidefork/`、`Tony.Tidefork.v4`）。
 
@@ -36,8 +36,9 @@
 
 ## 模型與網路實作
 
-- 依照片與概念圖製作的低面數模型：8 個關節、64 mesh parts、1,744 triangles（執行時依關節＋材質合併成少量 mesh，減少 renderer 數）；青銅、暗紅胸板、金色孔眼、青色發光縫。`Assets/model-preview.png` 是實際 JSON 幾何的離線預覽，不是遊戲截圖。
-- `tools/build-model.js` 產生 `Assets/model.json`；使用實際同份資產在 Unity 建立 Mesh。`tools/preview-model.py` 以 Pillow／NumPy 深度光柵化三視角。
+- 依新版三視圖重製的低面數模型：8 個關節、70 mesh parts、2,388 triangles。細長頸部、分叉冠枝、凹孔、倒角紅石胸板、立體橫魚與魚鰭、收攏根腳；胸口取消青色發光縫。每個 triangle corner 帶有固定在 rest pose 的 UV，執行時仍依關節＋材質合併 mesh。`Assets/model-preview.png` 使用實際 JSON 與貼圖做離線渲染，不是遊戲截圖。
+- `node tools/build-model.js` 產生 `Assets/model.json`；`python tools/build-textures.py` 以固定 seed 產生兩張 512×512 可重複貼圖（青銅氧化紋、紅石礦脈），兩者隨 DLL 嵌入，無外部下載。Python 需 Pillow／NumPy。`python tools/preview-model.py` 使用同一份 UV 與貼圖渲染三視角。建置使用 Windows PowerShell：`powershell.exe -NoProfile -File build.ps1`（於 repo 根目錄）。
+- 0.17.2 已通過離線幾何、UV、貼圖打包與既有規則／API 檢查；尚未遊戲內實測材質光照及動畫。
 - 以 `SpawnManager.ManualSpawn(Spider, ...)` 取得原生已註冊的 NetworkObject、NetworkTransform、Vulnerable、Interactive、NavMeshAgent。已確認 `SpiderMelee(107)` 根節點含上述元件。
 - 新增的模組皆為普通 MonoBehaviour，不改動原生 NetworkBehaviour／RPC 排序。對有 TideCreature 標記的個體抑制原生 AI、動畫攻擊與死亡掉落，正常野生蜘蛛維持原邏輯。原生 Animator 保持啟用（NetworkAnimator 每幀讀取、無 enabled 防護），只強制關閉蜘蛛 renderer；名稱／血條改到模型上方 3.2 m。
 - 房主控制移動與戰鬥。`Tony.Tidefork.v4` 在動作切換時立即傳送動作時間與 ID 清單，另每 0.5 秒心跳（動作變化最多每秒 10 次）；客戶端只接受房主清單，等待原生實體到達後掛上模型，支援晚加入。使用原生 NetworkTransform 同步位置。

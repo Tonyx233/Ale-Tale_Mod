@@ -1,4 +1,4 @@
-param([string]$GamePath = 'C:\Program Files (x86)\Steam\steamapps\common\Ale and Tale Tavern')
+﻿param([string]$GamePath = 'C:\Program Files (x86)\Steam\steamapps\common\Ale and Tale Tavern')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -45,6 +45,13 @@ try {
  $gun=Calls (Method (TypeDef $game 'GunTool') 'RaycastShot' '')
  if($gun -notmatch 'TryGetComponent<Interactive>' -or $gun -notmatch 'GetComponentInParent<Vulnerable>'){throw 'Native weapon collider contract changed'}; $count++
  if(!($mod.MainModule.Resources|Where-Object Name -eq 'Tony.Tidefork.model.json')){throw 'Missing Tidefork model'}; $count++
+ foreach($asset in @('model.json','bronze.png','red-stone.png')) {
+  $embedded=$mod.MainModule.Resources|Where-Object Name -eq ('Tony.Tidefork.'+$asset)
+  if(!$embedded){throw "Missing Tidefork embedded asset $asset"}
+  $source=[IO.File]::ReadAllBytes((Join-Path $root ('Tidefork\Assets\'+$asset)))
+  if([Convert]::ToBase64String($embedded.GetResourceData()) -ne [Convert]::ToBase64String($source)){throw "Stale Tidefork embedded asset $asset"}; $count++
+ }
+
  foreach($name in @('TideSummons','TideCreature','TideModel','TideRules','M4Armory','HorseStable','ChestQuickStack','YouTubeJukeboxPanel','ItemStacks')){[void](TypeDef $mod $name);$count++}
  $manager=TypeDef $mod 'TideSummons';$creature=TypeDef $mod 'TideCreature'
  if(@((TypeDef $mod 'TideRules').Fields | Where-Object { $_.Name -in 'Limit','Lifetime' }).Count){throw 'Room cap and lifetime must stay removed'}; $count++

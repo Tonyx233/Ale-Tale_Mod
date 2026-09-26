@@ -7,6 +7,7 @@ import numpy as np
 
 root = Path(__file__).resolve().parents[1]
 data = json.loads((root / 'Assets/model.json').read_text())
+textures = [np.array(Image.open(root / 'Assets' / name).convert('RGB'))[::-1] for name in data.get('textures', [])]
 offsets = {}
 for bone in data['bones']:
     parent = offsets.get(bone['parent'], [0, 0, 0])
@@ -16,7 +17,7 @@ im = Image.new('RGB', (1440 * scale, 850 * scale), '#101a25')
 draw = ImageDraw.Draw(im)
 font = ImageFont.truetype('C:/Windows/Fonts/msjh.ttc', 24 * scale)
 small = ImageFont.truetype('C:/Windows/Fonts/msjh.ttc', 17 * scale)
-draw.text((40*scale, 25*scale), '十魚架 · 實際低面數模型', font=font, fill='#ead6af')
+draw.text((40*scale, 25*scale), '十魚架 · 新版實際模型與材質', font=font, fill='#ead6af')
 for view, angle in enumerate([0, -35, 90]):
     faces = []
     canvas=np.array(im)
@@ -36,13 +37,15 @@ for view, angle in enumerate([0, -35, 90]):
             u=[b[i]-a[i] for i in range(3)]; v=[c[i]-a[i] for i in range(3)]
             n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]]
             length=math.sqrt(sum(x*x for x in n)) or 1
-            light=.5+.5*max(0,sum(n[i]/length*[-.3,.7,.65][i] for i in range(3)))
+            light=.62+.46*max(0,sum(n[i]/length*[-.3,.7,.65][i] for i in range(3)))
             rgb=data['materials'][part['material']]
             if part['material'] in [3,5]: light=1
             color=tuple(min(255,int(c*255*light)) for c in rgb)
             p=[project(v) for v in pts]
-            faces.append((p,color))
-    for points,color in faces:
+            uv=np.array(part['uv'][at*2:(at+3)*2]).reshape(3,2)
+            tex=textures[part['material']] if part['material'] < len(textures) else None
+            faces.append((p,color,uv,tex,light))
+    for points,color,uv,tex,light in faces:
         (ax,ay,az),(bx,by,bz),(cx,cy,cz)=points
         lo_x=max(0,min(ax,bx,cx)); hi_x=min(im.width-1,max(ax,bx,cx))
         lo_y=max(0,min(ay,by,cy)); hi_y=min(im.height-1,max(ay,by,cy))
@@ -56,7 +59,14 @@ for view, angle in enumerate([0, -35, 90]):
         tile=depths[lo_y:hi_y+1,lo_x:hi_x+1]
         mask=(u>=0)&(v>=0)&(w>=0)&(z>tile)
         tile[mask]=z[mask]
-        canvas[lo_y:hi_y+1,lo_x:hi_x+1][mask]=color
+        if tex is None:
+            canvas[lo_y:hi_y+1,lo_x:hi_x+1][mask]=color
+        else:
+            st=(u[:,:,None]*uv[0]+v[:,:,None]*uv[1]+w[:,:,None]*uv[2])%1
+            tx=(st[:,:,0]*tex.shape[1]).astype(int)%tex.shape[1]
+            ty=(st[:,:,1]*tex.shape[0]).astype(int)%tex.shape[0]
+            sampled=np.clip(tex[ty,tx]*light,0,255).astype('uint8')
+            canvas[lo_y:hi_y+1,lo_x:hi_x+1][mask]=sampled[mask]
     im=Image.fromarray(canvas); draw=ImageDraw.Draw(im)
     draw.text(((170+view*480)*scale,780*scale), ['正面','斜側面','側面'][view],font=small,fill='#9bc4ca')
 im.resize((1440,850),Image.Resampling.LANCZOS).save(root/'Assets/model-preview.png')

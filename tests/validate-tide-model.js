@@ -7,7 +7,8 @@ for(const key of ['torso','neck','crown','jaw','tail','footL','footR'])check(bon
 for(const p of d.parts){
  check(!names.has(p.name),'unique part');names.add(p.name);check(bones.has(p.bone),'bound bone');
  check(p.material>=0&&p.material<d.materials.length,'material');check(p.vertices.length%3===0&&p.vertices.every(Number.isFinite),'vertices');
- check(p.triangles.length%3===0,'triangle list');let volume=0,edges=new Map();
+ check(p.triangles.length%3===0,'triangle list');
+ check(p.uv?.length===p.triangles.length*2&&p.uv.every(Number.isFinite),'per-corner UVs '+p.name);let volume=0,edges=new Map();
  for(let i=0;i<p.triangles.length;i+=3){
   let ids=p.triangles.slice(i,i+3);check(ids.every(j=>Number.isInteger(j)&&j>=0&&j<p.vertices.length/3),'index bounds');
   let [a,b,c]=ids.map(j=>p.vertices.slice(j*3,j*3+3));
@@ -22,4 +23,12 @@ for(const p of d.parts){
  triangles+=p.triangles.length/3;
 }
 check(triangles<6000,'mesh budget');
+check(d.textures?.length===2,'two textured materials');
+for(const name of d.textures){
+ const file=fs.readFileSync(path.join(__dirname,'../Tidefork/Assets',name));
+ check(file.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'PNG signature '+name);
+ check(file.readUInt32BE(16)===512&&file.readUInt32BE(20)===512,'texture dimensions '+name);
+}
+check(!names.has('chest-tide-seam'),'reference chest has no emissive seam');
+check(names.has('neck-socket-rim')&&names.has('lower-shield-boss'),'reference ornaments');
 console.log(`PASS: ${checks} geometry checks; ${d.parts.length} parts, ${triangles} triangles`);

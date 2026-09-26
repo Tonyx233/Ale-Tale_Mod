@@ -8,11 +8,12 @@ namespace TonyMods
     public sealed class TideModel : MonoBehaviour
     {
         [Serializable] private sealed class Bone { public string name, parent; public float[] p; }
-        [Serializable] private sealed class Part { public string name, bone; public int material; public float[] vertices; public int[] triangles; }
-        [Serializable] private sealed class Definition { public Bone[] bones; public Part[] parts; public float[][] materials; }
+        [Serializable] private sealed class Part { public string name, bone; public int material; public float[] vertices, uv; public int[] triangles; }
+        [Serializable] private sealed class Definition { public Bone[] bones; public Part[] parts; public float[][] materials; public string[] textures; }
         private readonly Dictionary<string, Transform> bones = new Dictionary<string, Transform>();
         private readonly List<Mesh> meshes = new List<Mesh>();
         private readonly List<Material> materials = new List<Material>();
+        private readonly List<Texture2D> textures = new List<Texture2D>();
         private Transform orb;
         private LineRenderer effect, warning;
         private Material glow, water;
@@ -40,7 +41,23 @@ namespace TonyMods
                 float[] rgb = data.materials[i]; var color = new Color(rgb[0], rgb[1], rgb[2]);
                 var material = new Material(shader); material.name = "Tidefork palette " + i;
                 material.SetColor("_Color", color); material.SetColor("_BaseColor", color);
-                material.SetFloat("_Metallic", i == 1 ? .08f : .6f); material.SetFloat("_Smoothness", .3f);
+                material.SetFloat("_Metallic", i == 1 || i == 4 ? .02f : .48f);
+                material.SetFloat("_Smoothness", i == 1 ? .19f : .28f);
+                if (data.textures != null && i < data.textures.Length)
+                {
+                    using (Stream image = typeof(TideModel).Assembly.GetManifestResourceStream("Tony.Tidefork." + data.textures[i]))
+                    using (var bytes = new MemoryStream())
+                    {
+                        if (image == null) throw new InvalidDataException("Missing Tidefork texture: " + data.textures[i]);
+                        image.CopyTo(bytes);
+                        var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true);
+                        textures.Add(texture);
+                        if (!ImageConversion.LoadImage(texture, bytes.ToArray(), false)) throw new InvalidDataException("Invalid Tidefork texture");
+                        texture.name = "Tidefork " + data.textures[i]; texture.wrapMode = TextureWrapMode.Repeat;
+                        texture.filterMode = FilterMode.Trilinear; texture.anisoLevel = 4;
+                        material.SetTexture("_MainTex", texture); material.SetTexture("_BaseMap", texture);
+                    }
+                }
                 if (i == 3 || i == 5) { material.EnableKeyword("_EMISSION"); material.SetColor("_EmissionColor", color * (i == 3 ? .35f : 1.4f)); }
                 materials.Add(material);
             }
@@ -50,14 +67,21 @@ namespace TonyMods
                 node.SetParent(String.IsNullOrEmpty(bone.parent) ? transform : bones[bone.parent], false);
                 node.localPosition = new Vector3(bone.p[0], bone.p[1], bone.p[2]); bones.Add(bone.name, node);
             }
-            // One flat-shaded mesh per bone and material: same look as 64 separate parts, far fewer renderers.
+            // Group by animated bone and material; preserve per-corner UVs and flat normals.
+            var uvs = new Dictionary<string, List<Vector2>>();
             var groups = new Dictionary<string, List<Vector3>>(); var owners = new Dictionary<string, Part>();
             foreach (Part part in data.parts)
             {
                 string key = part.bone + "|" + part.material; List<Vector3> corners;
-                if (!groups.TryGetValue(key, out corners)) { groups.Add(key, corners = new List<Vector3>()); owners.Add(key, part); }
-                foreach (int index in part.triangles)
-                { int at = index * 3; corners.Add(new Vector3(part.vertices[at], part.vertices[at + 1], part.vertices[at + 2])); }
+                if (!groups.TryGetValue(key, out corners)) { groups.Add(key, corners = new List<Vector3>()); owners.Add(key, part); uvs.Add(key, new List<Vector2>()); }
+                if (part.uv == null || part.uv.Length != part.triangles.Length * 2)
+                    throw new InvalidDataException("Invalid Tidefork UV count: " + part.name);
+                for (int i = 0; i < part.triangles.Length; i++)
+                {
+                    int at = part.triangles[i] * 3;
+                    corners.Add(new Vector3(part.vertices[at], part.vertices[at + 1], part.vertices[at + 2]));
+                    uvs[key].Add(new Vector2(part.uv[i * 2], part.uv[i * 2 + 1]));
+                }
             }
             foreach (var group in groups)
             {
@@ -65,7 +89,7 @@ namespace TonyMods
                 var go = new GameObject("Tidefork " + group.Key); go.transform.SetParent(bones[part.bone], false);
                 var triangles = new int[group.Value.Count];
                 for (int i = 0; i < triangles.Length; i++) triangles[i] = i;
-                var mesh = new Mesh { name = go.name, vertices = group.Value.ToArray(), triangles = triangles };
+                var mesh = new Mesh { name = go.name, vertices = group.Value.ToArray(), triangles = triangles, uv = uvs[group.Key].ToArray() };
                 mesh.RecalculateNormals(); mesh.RecalculateBounds(); meshes.Add(mesh);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh; go.AddComponent<MeshRenderer>().sharedMaterial = materials[part.material];
             }
@@ -250,6 +274,7 @@ namespace TonyMods
         }
         private void OnDestroy()
         {
+            foreach (Texture2D texture in textures) if (texture != null) Destroy(texture);
             foreach (Mesh mesh in meshes) if (mesh != null) Destroy(mesh);
             foreach (Material material in materials) if (material != null) Destroy(material);
             if (glow != null) Destroy(glow); if (water != null) Destroy(water);
