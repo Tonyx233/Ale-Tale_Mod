@@ -41,8 +41,9 @@ namespace TonyMods
 
         private GunTool gun;
         private M4Model model;
-        private int pendingCharge, pendingWear;
-        private float pendingSince, heat, lastShot = -10, emptyAt, noiseAt, kick, pitchDebt, yawDebt, noticeUntil;
+        private readonly M4Batch batch = new M4Batch();
+        private bool starting;
+        private float heat, lastShot = -10, emptyAt, noiseAt, kick, pitchDebt, yawDebt, noticeUntil;
         private string notice;
         private Coroutine reload;
         private readonly List<Casing> casings = new List<Casing>();
@@ -72,6 +73,8 @@ namespace TonyMods
         private uint ItemId { get { return (uint)ItemIdField.GetValue(gun); } }
         private bool Reloading { get { return (bool)ReloadingField.GetValue(gun); } }
         private bool Idle { get { return (GunTool.State)StateField.GetValue(gun) == GunTool.State.Idle; } }
+        // Reload in progress or being started: native CheckReload must not start another one.
+        internal bool Busy { get { return starting || Reloading; } }
 
         public void AfterSelected()
         {
@@ -94,14 +97,14 @@ namespace TonyMods
             if (gun.clipContent <= 0) { Empty(); return; }
             gun.clipContent--;
             ShotTimerField.SetValue(gun, gun.fireRate);
-            if (pendingCharge == 0) pendingSince = Time.time;
-            pendingCharge++; pendingWear++;
+            batch.Add(Time.time);
             bool scoped = MusketScope.IsScoped(gun);
             gun.spreadAngle = M4Rules.Spread(heat, scoped);
             heat += 1; lastShot = Time.time;
             RaycastMethod.Invoke(gun, null);
             Remember(gun.clipContent);
-            if (M4Rules.ShouldFlush(pendingCharge, 0, gun.clipContent)) Flush();
+            // May re-enter StartReload on the host when the magazine hits zero (see Flush).
+            if (M4Rules.ShouldFlush(batch.Charge, 0, gun.clipContent)) Flush();
             kick = 1;
             if (!scoped) { model.Flash(); Eject(); }
             float climb = M4Rules.Recoil(scoped, M4Armory.RecoilScale);
@@ -126,47 +129,56 @@ namespace TonyMods
         }
 
         // Charge and durability RPCs accept a count, so bursts are merged (see M4Rules.ShouldFlush).
+        // Counts are taken before sending: host RPCs run synchronously and re-enter via
+        // OnItemsChanged -> CheckReload -> Reload (0.14.0 recursed until the stack overflowed).
         private void Flush()
         {
-            if (pendingCharge == 0 && pendingWear == 0) return;
+            int charge, wear;
+            if (!batch.Take(out charge, out wear)) return;
             uint id = ItemId;
             ContainerNet inventory = PlayerInventory.Instance != null ? PlayerInventory.Instance.inventory : null;
             if (id != 0 && inventory != null)
             {
-                if (pendingCharge > 0) inventory.RemoveItemChargeServerRpc(id, (ushort)pendingCharge);
+                if (charge > 0) inventory.RemoveItemChargeServerRpc(id, (ushort)charge);
                 ItemData data = M4Armory.RifleData;
-                if (pendingWear > 0 && data != null && data.durability > 0 && ItemManager.Instance != null)
+                if (wear > 0 && data != null && data.durability > 0 && ItemManager.Instance != null)
                 {
                     Item item;
-                    if (inventory.GetItemById(id, out item, true) && item.durability <= data.durabilityPerHit * pendingWear && SoundManager.Instance != null)
+                    if (inventory.GetItemById(id, out item, true) && item.durability <= data.durabilityPerHit * wear && SoundManager.Instance != null)
                     {
                         var broken = (SoundEvent)BreakField.GetValue(gun);
                         SoundManager.Instance.Play(broken, transform.position);
                         SoundManager.Instance.PlayServerRpc(broken, transform.position, true, default(ServerRpcParams));
                     }
-                    ItemManager.Instance.DamageToolServerRpc(id, (ushort)pendingWear, default(ServerRpcParams));
+                    ItemManager.Instance.DamageToolServerRpc(id, (ushort)wear, default(ServerRpcParams));
                 }
             }
-            pendingCharge = 0; pendingWear = 0;
         }
 
         // Called from the GunTool.Reload prefix. Moves the real round count (native loads one).
         public void StartReload()
         {
-            if (Reloading || !Idle || gun.clipContent >= gun.clipSize || PlayerInventory.Instance == null) return;
+            if (starting || Reloading || !Idle || gun.clipContent >= gun.clipSize || PlayerInventory.Instance == null) return;
+            uint id = ItemId;
+            if (id == 0) return;
             ContainerNet inventory = PlayerInventory.Instance.inventory;
             int need = M4Rules.ReloadCount(inventory.GetItemAmount(M4Armory.AmmoId), gun.clipContent, gun.clipSize);
             if (need <= 0) { if (gun.clipContent == 0) Empty(); return; }
-            Flush();
-            uint id = ItemId;
-            if (id == 0) return;
-            inventory.RemoveAmountServerRpc(M4Armory.AmmoId, (ushort)need);
-            inventory.AddItemChargeServerRpc(id, (ushort)need);
             bool empty = gun.clipContent == 0;
             int target = gun.clipContent + need;
-            Remember(target);
-            ReloadingField.SetValue(gun, true);
-            SetStateMethod.Invoke(gun, new object[] { GunTool.State.Reload });
+            starting = true;
+            try
+            {
+                // Same order as native Reload: mark the reload before any RPC, because on the host each
+                // RPC synchronously fires OnItemsChanged -> CheckReload -> Reload back into this method.
+                ReloadingField.SetValue(gun, true);
+                SetStateMethod.Invoke(gun, new object[] { GunTool.State.Reload });
+                Remember(target);
+                Flush();
+                inventory.RemoveAmountServerRpc(M4Armory.AmmoId, (ushort)need);
+                inventory.AddItemChargeServerRpc(id, (ushort)need);
+            }
+            finally { starting = false; }
             reload = StartCoroutine(ReloadRoutine(target, empty));
         }
 
@@ -232,7 +244,7 @@ namespace TonyMods
             if (gun == null || model == null) return;
             float dt = Time.deltaTime;
             heat = M4Rules.CoolHeat(heat, dt, Time.time - lastShot);
-            if (M4Rules.ShouldFlush(pendingCharge, Time.time - pendingSince, gun.clipContent)) Flush();
+            if (M4Rules.ShouldFlush(batch.Charge, Time.time - batch.Since, gun.clipContent)) Flush();
             if (CanUse() && Input.GetKeyDown(M4Armory.FireModeKey) && !Reloading)
             {
                 automatic = !automatic;

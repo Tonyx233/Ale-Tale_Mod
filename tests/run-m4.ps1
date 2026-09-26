@@ -100,6 +100,23 @@ try {
         if ([Convert]::ToBase64String($r.GetResourceData()) -ne [Convert]::ToBase64String($expected)) { throw "Stale resource $($res[0])" }
         $count++
     }
+    # Host ServerRpcs run synchronously and re-enter through OnItemsChanged -> CheckReload -> Reload.
+    # 0.14.0 sent RPCs before clearing its counters / marking the reload and overflowed the stack.
+    $rifle = Def $mod 'TonyMods.M4Rifle'
+    function Index($lines, $pattern) { [Array]::FindIndex([object[]]$lines, [Predicate[object]]{ param($l) $l -match $pattern }) }
+    $flush = @(Body (Method $rifle 'Flush' ''))
+    $take = Index $flush 'M4Batch::Take'
+    $firstRpc = Index $flush 'ServerRpc'
+    if ($take -lt 0 -or $firstRpc -lt 0 -or $take -gt $firstRpc) { throw 'Flush must clear the batch before sending any RPC' }
+    $start = @(Body (Method $rifle 'StartReload' ''))
+    $mark = Index $start 'M4Rifle::ReloadingField'
+    $state = Index $start 'M4Rifle::SetStateMethod'
+    $nested = Index $start 'M4Rifle::Flush'
+    $remove = Index $start 'RemoveAmountServerRpc'
+    $addCharge = Index $start 'AddItemChargeServerRpc'
+    if ($mark -lt 0 -or $state -lt 0 -or $mark -gt $nested -or $state -gt $nested -or $nested -gt $remove -or $remove -gt $addCharge) { throw 'StartReload must mark the reload before Flush and the inventory RPCs' }
+    if (!((Body (Method $armory 'BeforeCheckReload' 'GunTool')) -match 'M4Rifle::get_Busy')) { throw 'CheckReload prefix must ignore a reload in progress' }
+    $count += 3
     $scopeGun = Body (Method (Def $mod 'TonyMods.MusketScope') 'GunUpdated' 'GunTool')
     $isM4 = [Array]::FindIndex([object[]]$scopeGun, [Predicate[object]]{ param($l) $l -match 'M4Armory::IsM4' })
     $mesh = [Array]::FindIndex([object[]]$scopeGun, [Predicate[object]]{ param($l) $l -match 'ldstr "MusketRoot/Musket/Musket1_2_1"' })

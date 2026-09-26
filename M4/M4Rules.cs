@@ -62,4 +62,24 @@ namespace TonyMods
             return intervals * (double)interval + (intervals / magazine) * (double)reload;
         }
     }
+
+    // Shots waiting for the merged charge/durability RPCs. Take() clears the counts before the
+    // caller sends anything: on the host a ServerRpc runs synchronously, the inventory change fires
+    // GunTool.OnItemsChanged -> CheckReload -> Reload, and that nested call must find nothing to resend.
+    internal sealed class M4Batch
+    {
+        public int Charge { get; private set; }
+        public int Wear { get; private set; }
+        public float Since { get; private set; }
+        public void Add(float now)
+        {
+            if (Charge == 0 && Wear == 0) Since = now;
+            Charge++; Wear++;
+        }
+        public bool Take(out int charge, out int wear)
+        {
+            charge = Charge; wear = Wear; Charge = 0; Wear = 0;
+            return charge > 0 || wear > 0;
+        }
+    }
 }

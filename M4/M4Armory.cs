@@ -240,7 +240,8 @@ namespace TonyMods
         // Native CheckReload reloads whenever the gun is selected; the M4 only does so when empty.
         private static bool BeforeCheckReload(GunTool __instance)
         {
-            return __instance.GetComponent<M4Rifle>() == null || __instance.clipContent <= 0;
+            M4Rifle rifle = __instance.GetComponent<M4Rifle>();
+            return rifle == null || (__instance.clipContent <= 0 && !rifle.Busy);
         }
 
         // Third-person: the native pose switch only knows musket/crossbow IDs (TorsoState 3).

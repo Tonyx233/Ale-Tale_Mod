@@ -33,6 +33,32 @@ internal static class M4RulesTests
         // Per second at 12.5 shots/s: flushes(charge) + flushes(durability) <= 4.2 RPC list updates.
         Check(12.5 / M4Rules.FlushShots * 2 <= 4.2, "Inventory list updates stay near 4 per second");
 
+        // Host re-entrancy (0.14.0 crash): every "RPC" synchronously re-enters Flush, as
+        // RemoveItemCharge/DamageTool -> OnItemsChanged -> CheckReload -> Reload -> Flush does on the host.
+        M4Batch batch = new M4Batch();
+        int sentCharge = 0, sentWear = 0, depth = 0, maxDepth = 0, rpcs = 0;
+        Action flush = null;
+        flush = delegate
+        {
+            int c, w;
+            if (!batch.Take(out c, out w)) return;
+            depth++; maxDepth = Math.Max(maxDepth, depth);
+            sentCharge += c; rpcs++; flush();
+            sentWear += w; rpcs++; flush();
+            depth--;
+        };
+        for (int clip = 29; clip >= 0; clip--)
+        {
+            batch.Add(30 - clip);
+            if (M4Rules.ShouldFlush(batch.Charge, 0, clip)) flush();
+        }
+        Check(sentCharge == 30 && sentWear == 30, "Re-entrant host flush sends each shot exactly once");
+        Check(maxDepth == 1 && rpcs == 10, "Re-entrant host flush does not recurse (5 flushes x 2 RPCs)");
+        int dummyC, dummyW;
+        Check(!batch.Take(out dummyC, out dummyW) && batch.Charge == 0, "Nothing left after the magazine");
+        batch.Add(5); batch.Add(5.2f);
+        Check(batch.Since == 5 && batch.Charge == 2, "Batch age starts at the oldest pending shot");
+
         // Spread bloom: bounded, grows with heat, scoped is tighter, cools after a pause.
         Check(Near(M4Rules.Spread(0, false), M4Rules.BaseSpread, 1e-6), "First shot uses base spread");
         Check(M4Rules.Spread(10, false) > M4Rules.Spread(2, false), "Spread grows while firing");
