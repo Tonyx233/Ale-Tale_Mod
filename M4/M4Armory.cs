@@ -28,7 +28,7 @@ namespace TonyMods
         private ManualLogSource log;
         private Harmony harmony;
         private ConfigEntry<bool> sell, fde;
-        private ConfigEntry<int> price, ammoPrice, ammoPerPurchase, damage, rpm, magazine, durability, scopePower;
+        private ConfigEntry<int> price, ammoPrice, ammoPerPurchase, damage, rpm, magazine, durability;
         private ConfigEntry<float> recoil, reloadSeconds, modelScale, volume;
         private ConfigEntry<string> fpOffset;
         private ConfigEntry<KeyCode> modeKey;
@@ -45,7 +45,6 @@ namespace TonyMods
         internal static ItemData AmmoData { get { return instance != null ? instance.ammoData : null; } }
         internal static int Damage { get { return instance.damage.Value; } }
         internal static int Rpm { get { return instance.rpm.Value; } }
-        internal static int ScopePower { get { return instance != null ? instance.scopePower.Value : 4; } }
         internal static float RecoilScale { get { return instance.recoil.Value; } }
         internal static float ReloadSeconds { get { return instance.reloadSeconds.Value; } }
         internal static float ModelScale { get { return instance.modelScale.Value; } }
@@ -69,7 +68,6 @@ namespace TonyMods
             durability = config.Bind("M4", "Durability", 3000, new ConfigDescription("Shots before the rifle breaks (repairable like the musket).", new AcceptableValueRange<int>(10, 60000)));
             reloadSeconds = config.Bind("M4", "ReloadSeconds", 2.2f, new ConfigDescription("Magazine change time; empty reloads add 0.4 s for the charging handle.", new AcceptableValueRange<float>(.5f, 6f)));
             recoil = config.Bind("M4", "RecoilScale", 1f, new ConfigDescription("Camera kick multiplier (0 disables recoil).", new AcceptableValueRange<float>(0f, 3f)));
-            scopePower = config.Bind("M4", "ScopeMagnification", 4, new ConfigDescription("ACOG magnification; right mouse toggles it.", new AcceptableValueRange<int>(2, 8)));
             modeKey = config.Bind("M4", "FireModeKey", KeyCode.B, "Toggle full-auto / semi-auto while holding the M4.");
             fde = config.Bind("M4", "SandFurniture", false, "Use the sand (FDE) handguard, stock and magazine instead of black.");
             volume = config.Bind("M4", "Volume", .8f, new ConfigDescription("Rifle sound volume, multiplied by the game's sound volume.", new AcceptableValueRange<float>(0f, 1f)));
@@ -105,7 +103,7 @@ namespace TonyMods
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             StartCoroutine(Localize());
             log.LogInfo("M4A1 ready: item " + RifleId + " + 5.56 rounds " + AmmoId + "; " + rpm.Value + " RPM, " + damage.Value + " dmg, " + magazine.Value +
-                "-round magazine, ACOG " + scopePower.Value + "x, " + modeKey.Value + " toggles fire mode; optics 47932-47936 (drag onto the rifle, " + detachKey.Value + " removes).");
+                "-round magazine, iron sights, " + modeKey.Value + " toggles fire mode; optics 47932 / 47935 / 47936 (drag onto the rifle, " + detachKey.Value + " removes).");
         }
 
         private void Patch(Type type, string target, string handler, bool prefix)
@@ -403,8 +401,8 @@ namespace TonyMods
             SetText(table, "TonyM4Name", chinese ? "M4A1 步槍" : "M4A1 Rifle");
             string detach = detachKey.Value.ToString();
             SetText(table, "TonyM4Description", chinese
-                ? "全自動卡賓槍，" + magazine.Value + " 發彈匣，出廠附 ACOG " + scopePower.Value + "× 瞄準鏡。按住左鍵連發，R 換彈，" + key + " 切換全自動／半自動，右鍵開鏡。把紅點、全像、黃銅鏡或狙擊鏡拖到槍上即可換鏡，" + detach + " 拆下改用機械瞄具。使用 5.56 子彈。"
-                : "Full-auto carbine with a " + magazine.Value + "-round magazine and a " + scopePower.Value + "x ACOG. Hold fire for automatic, R reloads, " + key + " toggles auto/semi, right mouse aims. Drag a red dot, holographic, brass or sniper optic onto it to swap; " + detach + " removes the optic for iron sights. Uses 5.56 rounds.");
+                ? "全自動卡賓槍，" + magazine.Value + " 發彈匣，出廠為機械瞄具。按住左鍵連發，R 換彈，" + key + " 切換全自動／半自動，右鍵開鏡。把紅點、黃銅鏡或狙擊鏡拖到槍上即可換鏡，" + detach + " 拆下改用機械瞄具。使用 5.56 子彈。"
+                : "Full-auto carbine with a " + magazine.Value + "-round magazine and iron sights. Hold fire for automatic, R reloads, " + key + " toggles auto/semi, right mouse aims. Drag a red dot, brass or sniper optic onto it to fit one; " + detach + " removes the optic for iron sights. Uses 5.56 rounds.");
             SetText(table, "TonyM556Name", chinese ? "5.56 子彈" : "5.56 Rounds");
             SetText(table, "TonyM556Description", chinese ? "M4A1 步槍用彈藥。商店每次購買 " + rounds + " 發。" : "Ammunition for the M4A1 rifle. Each merchant purchase gives " + rounds + " rounds.");
             LocalizeOptics(table);

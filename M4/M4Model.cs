@@ -19,7 +19,7 @@ namespace TonyMods
         private static Definition definition;
         private static Mesh[] meshes;
         private static Mesh flashMesh;
-        private static Material metal, polymer, glow, flashMaterial;
+        private static Material metal, polymer, flashMaterial;
 
         public Transform Recoil { get; private set; }
         public Transform Muzzle { get; private set; }
@@ -95,14 +95,14 @@ namespace TonyMods
                 go.transform.localPosition = V(p.p); go.transform.localScale = V(p.s); go.transform.localRotation = Quaternion.Euler(V(p.r));
                 go.AddComponent<MeshFilter>().sharedMesh = meshes[i];
                 MeshRenderer renderer = go.AddComponent<MeshRenderer>();
-                renderer.sharedMaterial = p.name == "Fiber optic" ? glow : IsPolymer(p) ? polymer : metal;
+                renderer.sharedMaterial = IsPolymer(p) ? polymer : metal;
                 renderer.shadowCastingMode = firstPerson ? UnityEngine.Rendering.ShadowCastingMode.Off : UnityEngine.Rendering.ShadowCastingMode.On;
                 renderer.receiveShadows = !firstPerson;
                 renderers.Add(new KeyValuePair<Renderer, Piece>(renderer, p));
             }
             Muzzle = Node("Muzzle", bones["rifle"]); Muzzle.localPosition = new Vector3(0, ModelBore, .612f);
             // ADS anchors sit under Mapping, outside Recoil: aligning on them keeps the recoil kick visible.
-            foreach (M4ScopeKind kind in new[] { M4ScopeKind.Iron, M4ScopeKind.RedDot, M4ScopeKind.Holo })
+            foreach (M4ScopeKind kind in new[] { M4ScopeKind.Iron, M4ScopeKind.RedDot })
             {
                 M4ScopeProfile profile = M4Scopes.Profile(kind);
                 Transform anchor = Node("Sight " + kind, mapping);
@@ -122,7 +122,7 @@ namespace TonyMods
             go.transform.SetParent(parent, false); return go.transform;
         }
 
-        private static bool IsPolymer(Piece p) { return p.role == "furniture" || p.role == "mag" || p.name == "Butt pad" || p.name == "Eye guard"; }
+        private static bool IsPolymer(Piece p) { return p.role == "furniture" || p.role == "mag" || p.name == "Butt pad"; }
         private static Vector3 V(float[] v) { return v == null || v.Length < 3 ? Vector3.zero : new Vector3(v[0], v[1], v[2]); }
 
         // Sight point of the fitted optic for aligned ADS; null for magnified optics.
@@ -205,8 +205,6 @@ namespace TonyMods
             for (int i = 0; i < built.Length; i++) built[i] = AuthoredMesh(data.parts[i]);
             metal = Surface(lit, "Tony M4 metal", .45f, .5f);
             polymer = Surface(lit, "Tony M4 polymer", 0, .22f);
-            glow = Surface(lit, "Tony M4 fiber", 0, .6f);
-            glow.EnableKeyword("_EMISSION"); glow.SetColor("_EmissionColor", new Color(.25f, .9f, .3f) * 1.6f);
             Shader unlit = Shader.Find("Universal Render Pipeline/Unlit") ?? lit;
             flashMaterial = new Material(unlit); flashMaterial.name = "Tony M4 flash"; flashMaterial.hideFlags = HideFlags.DontUnloadUnusedAsset;
             Color hot = new Color(1, .82f, .45f);
@@ -263,8 +261,8 @@ namespace TonyMods
         public static void ReleaseShared()
         {
             if (meshes != null) foreach (Mesh m in meshes) if (m != null) Destroy(m);
-            foreach (UnityEngine.Object o in new UnityEngine.Object[] { flashMesh, metal, polymer, glow, flashMaterial }) if (o != null) Destroy(o);
-            meshes = null; definition = null; flashMesh = null; metal = polymer = glow = flashMaterial = null;
+            foreach (UnityEngine.Object o in new UnityEngine.Object[] { flashMesh, metal, polymer, flashMaterial }) if (o != null) Destroy(o);
+            meshes = null; definition = null; flashMesh = null; metal = polymer = flashMaterial = null;
         }
     }
 }

@@ -78,54 +78,61 @@ internal static class M4RulesTests
         Check(Near(M4Rules.TimeToKill(200, 6, .1f, 30, 2.2f), 5.5, .005), "Conservative vs OrcMelee");
         Check(Near(M4Rules.TimeToKill(120, 35, 1.5f, 1, 0), 4.5, .005), "Musket vs wolf");
 
-        // Scope stages: M4 single stage 4x, musket keeps 3x -> 6x -> off.
-        ScopeCycle acog = new ScopeCycle(4);
-        acog.Advance(); Check(acog.IsActive && acog.Magnification == 4 && acog.IsLastStage, "ACOG opens at 4x");
-        acog.Advance(); Check(!acog.IsActive && acog.Magnification == 1, "Second press closes ACOG");
+        // Scope stages: a single stage toggles, musket keeps 3x -> 6x -> off.
+        ScopeCycle single = new ScopeCycle(4);
+        single.Advance(); Check(single.IsActive && single.Magnification == 4 && single.IsLastStage, "Single stage opens at 4x");
+        single.Advance(); Check(!single.IsActive && single.Magnification == 1, "Second press closes a single stage");
         ScopeCycle musket = new ScopeCycle();
         musket.Advance(); Check(musket.Magnification == 3 && !musket.IsLastStage, "Musket first stage");
         musket.Advance(); Check(musket.Magnification == 6 && musket.IsLastStage, "Musket last stage");
         bool threw = false; try { new ScopeCycle(new float[0]); } catch (ArgumentException) { threw = true; }
         Check(threw, "Scope needs a stage");
 
-        // Interchangeable optics: metaInt low byte, 0 = factory ACOG so 0.14.x rifles are unchanged.
-        Check(M4Scopes.Effective(0) == M4ScopeKind.Acog && M4Scopes.Effective(7) == M4ScopeKind.Acog && M4Scopes.Effective(255) == M4ScopeKind.Acog, "Default / unknown optic is the ACOG");
-        for (int k = 1; k <= M4Scopes.Count; k++)
+        // Interchangeable optics: metaInt low byte, 0 = factory iron sights. 3 / 4 (holographic / ACOG)
+        // were removed: rifles saved with them read as iron sights, their item IDs are no longer optics.
+        Check(M4Scopes.Effective(0) == M4ScopeKind.Iron && M4Scopes.Effective(7) == M4ScopeKind.Iron && M4Scopes.Effective(255) == M4ScopeKind.Iron, "Default / unknown optic is iron sights");
+        Check(M4Scopes.Effective(3) == M4ScopeKind.Iron && M4Scopes.Effective(4) == M4ScopeKind.Iron && !M4Scopes.IsKind(3) && !M4Scopes.IsKind(4), "Removed holographic / ACOG values read as iron sights");
+        Check(M4Scopes.Kinds.Length == 4, "Four optic kinds: iron, red dot, brass, sniper");
+        foreach (M4ScopeKind kind in M4Scopes.Kinds)
         {
-            int meta = M4Scopes.WithKind(0x12345600, (M4ScopeKind)k);
-            Check(M4Scopes.Effective(meta) == (M4ScopeKind)k && (meta & ~0xFF) == 0x12345600, "Optic byte round-trips and keeps other bits " + k);
+            int meta = M4Scopes.WithKind(0x12345600, kind);
+            Check(M4Scopes.IsKind((int)kind) && M4Scopes.Effective(meta) == kind && (meta & ~0xFF) == 0x12345600, "Optic byte round-trips and keeps other bits " + kind);
         }
-        Check(M4Scopes.ItemKinds.Length == 5 && !M4Scopes.HasItem(M4ScopeKind.Iron) && !M4Scopes.HasItem(M4ScopeKind.Default), "Five optic items; iron sights are not an item");
+        Check(M4Scopes.ItemKinds.Length == 3 && !M4Scopes.HasItem(M4ScopeKind.Iron) && !M4Scopes.HasItem(M4ScopeKind.Default) && !M4Scopes.HasItem((M4ScopeKind)3) && !M4Scopes.HasItem((M4ScopeKind)4), "Three optic items; iron sights are not an item");
+        Check(M4Scopes.ItemId(M4ScopeKind.RedDot) == 47932 && M4Scopes.ItemId(M4ScopeKind.Brass) == 47935 && M4Scopes.ItemId(M4ScopeKind.Sniper) == 47936, "Kept optic item IDs unchanged");
         foreach (M4ScopeKind kind in M4Scopes.ItemKinds)
         {
             M4ScopeKind back;
             ushort id = M4Scopes.ItemId(kind);
-            Check(id >= 47932 && id <= 47936 && M4Scopes.FromItem(id, out back) && back == kind, "Optic item id maps both ways " + kind);
+            Check(M4Scopes.FromItem(id, out back) && back == kind, "Optic item id maps both ways " + kind);
         }
         M4ScopeKind none;
         Check(!M4Scopes.FromItem(47931, out none) && !M4Scopes.FromItem(47937, out none) && !M4Scopes.FromItem(290, out none), "Ammo / neighbours are not optics");
+        Check(!M4Scopes.FromItem(47933, out none) && !M4Scopes.FromItem(47934, out none) && none == M4ScopeKind.Default, "Retired holographic / ACOG item IDs are not optics");
         M4ScopeSwap swap = M4Scopes.PlanAttach(0, 1, M4ScopeKind.RedDot);
-        Check(swap.Apply && swap.Returned == M4ScopeKind.Acog && M4Scopes.Effective(swap.NewMeta) == M4ScopeKind.RedDot && !swap.Split, "Red dot on a factory rifle returns the ACOG");
+        Check(swap.Apply && swap.Returned == M4ScopeKind.Iron && !M4Scopes.HasItem(swap.Returned) && M4Scopes.Effective(swap.NewMeta) == M4ScopeKind.RedDot && !swap.Split, "Red dot on a factory rifle returns nothing");
         swap = M4Scopes.PlanAttach(M4Scopes.WithKind(0, M4ScopeKind.Iron), 1, M4ScopeKind.Sniper);
         Check(swap.Apply && swap.Returned == M4ScopeKind.Iron && !M4Scopes.HasItem(swap.Returned), "Optic on iron sights returns nothing");
-        Check(!M4Scopes.PlanAttach(0, 1, M4ScopeKind.Acog).Apply && !M4Scopes.PlanAttach(0, 1, M4ScopeKind.Iron).Apply && !M4Scopes.PlanAttach(0, 0, M4ScopeKind.Holo).Apply, "Same optic, iron or empty stack is refused");
-        Check(M4Scopes.PlanAttach(0, 3, M4ScopeKind.Holo).Split, "Stacked rifles are split so one gets the optic");
+        swap = M4Scopes.PlanAttach(M4Scopes.WithKind(0, M4ScopeKind.RedDot), 1, M4ScopeKind.Brass);
+        Check(swap.Apply && swap.Returned == M4ScopeKind.RedDot && M4Scopes.Effective(swap.NewMeta) == M4ScopeKind.Brass, "Swapping optics returns the old one");
+        Check(!M4Scopes.PlanAttach(M4Scopes.WithKind(0, M4ScopeKind.Sniper), 1, M4ScopeKind.Sniper).Apply && !M4Scopes.PlanAttach(0, 1, M4ScopeKind.Iron).Apply && !M4Scopes.PlanAttach(0, 0, M4ScopeKind.RedDot).Apply && !M4Scopes.PlanAttach(0, 1, (M4ScopeKind)4).Apply, "Same optic, iron, removed optic or empty stack is refused");
+        Check(M4Scopes.PlanAttach(0, 3, M4ScopeKind.RedDot).Split, "Stacked rifles are split so one gets the optic");
         swap = M4Scopes.PlanDetach(M4Scopes.WithKind(0, M4ScopeKind.Brass), 1);
         Check(swap.Apply && swap.Returned == M4ScopeKind.Brass && M4Scopes.Effective(swap.NewMeta) == M4ScopeKind.Iron, "Detach returns the optic and leaves iron sights");
-        Check(M4Scopes.PlanDetach(0, 1).Returned == M4ScopeKind.Acog && !M4Scopes.PlanDetach(M4Scopes.WithKind(0, M4ScopeKind.Iron), 1).Apply, "Detach factory ACOG; nothing to detach from irons");
-        for (int k = 1; k <= M4Scopes.Count; k++)
+        Check(!M4Scopes.PlanDetach(0, 1).Apply && !M4Scopes.PlanDetach(4, 1).Apply && !M4Scopes.PlanDetach(M4Scopes.WithKind(0, M4ScopeKind.Iron), 1).Apply, "Nothing to detach from factory, old ACOG or iron rifles");
+        foreach (M4ScopeKind k in M4Scopes.Kinds)
         {
-            M4ScopeProfile p = M4Scopes.Profile((M4ScopeKind)k);
-            Check(p.Kind == (M4ScopeKind)k && p.Stages.Length > 0 && p.SpreadFactor > 0 && p.SpreadFactor < 1 && p.Role != null, "Profile complete " + k);
+            M4ScopeProfile p = M4Scopes.Profile(k);
+            Check(p.Kind == k && p.Stages.Length > 0 && p.SpreadFactor > 0 && p.SpreadFactor < 1 && p.Role != null, "Profile complete " + k);
             for (int i = 1; i < p.Stages.Length; i++) Check(p.Stages[i] > p.Stages[i - 1], "Stages ascend " + k);
             Check(p.Magnified == (p.Stages[0] >= 3), "Magnified optics start at 3x or more; 1x sights align " + k);
             Check(p.Magnified || (p.EyeDistance > .03f && p.EyeDistance < .2f && p.SightY > .08f && p.SightY < .1f), "Aligned sights have an eye point " + k);
             Check(p.FoldedIrons == (p.Kind != M4ScopeKind.Iron && p.Kind != M4ScopeKind.Sniper), "Folded BUIS except irons and the sniper mount " + k);
         }
-        Check(M4Scopes.Stages(M4ScopeKind.Acog, 6)[0] == 6 && M4Scopes.Stages(M4ScopeKind.Sniper, 6).Length == 3, "ACOG power from config; sniper 3/6/9");
+        Check(M4Scopes.Stages(M4ScopeKind.Brass).Length == 2 && M4Scopes.Stages(M4ScopeKind.Sniper).Length == 3 && M4Scopes.Stages(M4ScopeKind.Sniper)[2] == 9, "Brass 3/6, sniper 3/6/9");
         Check(M4Scopes.Profile(M4ScopeKind.Sniper).SpreadFactor < M4Scopes.Profile(M4ScopeKind.RedDot).SpreadFactor, "Higher power aims tighter");
-        float ring = M4Scopes.MoaToPixels(M4Scopes.HoloRingMoa, 70 / 1.5f, 1080);
-        Check(ring > 20 && ring < 30, "65 MOA holo ring is ~24 px at 1080p / 1.5x: " + ring);
+        float dot = M4Scopes.MoaToPixels(M4Scopes.DotMoa, 70 / 1.5f, 1080);
+        Check(dot > .5f && dot < 1.2f, "2 MOA red dot is under 1 px at 1080p / 1.5x (drawn with a 2.6 px floor): " + dot);
         ScopeCycle close = new ScopeCycle(1.3f);
         close.Advance(); Check(close.IsActive && Math.Abs(close.Magnification - 1.3f) < 1e-6 && close.IsLastStage, "1.3x iron-sight stage");
 

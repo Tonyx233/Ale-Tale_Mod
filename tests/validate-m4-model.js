@@ -18,7 +18,7 @@ for (const b of model.bones) {
 for (const name of ['rifle', 'mag', 'charge', 'trigger', 'selector']) check(bones.has(name), 'animated bone ' + name);
 
 let tris = 0, lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
-const optics = ['scope-reddot', 'scope-holo', 'scope-acog', 'scope-brass', 'scope-sniper'];
+const optics = ['scope-reddot', 'scope-brass', 'scope-sniper'];
 const roles = new Set([undefined, 'furniture', 'mag', 'iron-up', 'iron-down', ...optics]);
 for (const p of model.parts) {
   check(bones.has(p.bone), 'part bone ' + p.name);
@@ -48,7 +48,6 @@ check(Math.abs(hi[2] - .602) < .002, 'flash hider at z=0.602 (muzzle node at 0.6
 check(hi[1] - lo[1] > .3 && hi[1] - lo[1] < .38, 'height incl. tallest optic and magazine');
 check(tris < 6000, 'triangle budget ' + tris + ' (one optic visible at a time)');
 check(model.parts.filter(p => p.bone === 'mag').length >= 3, 'magazine parts animate with the mag bone');
-check(model.parts.some(p => p.name === 'Fiber optic'), 'fiber optic part (emissive material in DLL)');
 check(model.parts.some(p => p.name === 'Selector lever' && p.bone === 'selector'), 'selector lever rotates with fire mode');
 
 // Interchangeable optics: every role exists, and ADS sight points in M4Scopes.cs match the geometry.
@@ -65,8 +64,6 @@ check(Math.abs((ringTop[2][0] + ringTop[2][1]) / 2 - iron[1]) < .001, 'rear aper
 check(ringTop[1][0] - bounds(part('BUIS leaf'))[1][1] > .01, 'ghost ring aperture at least 10 mm');
 const tube = bounds(part("Red dot body")), red = sight("RedDot");
 check(Math.abs((tube[1][0] + tube[1][1]) / 2 - red[0]) < .001 && red[1] > tube[2][0] && red[1] < tube[2][1], 'red dot sight point on the tube axis');
-const hood = bounds(part('Holo hood top')), base = bounds(part('Holo base')), holo = sight('Holo');
-check(holo[0] > base[1][1] && holo[0] < hood[1][0] && holo[1] > hood[2][0] && holo[1] < hood[2][1], 'holo sight point inside the window');
 check(model.parts.filter(p => p.name.startsWith('Red dot') && /lens/i.test(p.name)).length === 0, 'red dot tube is open (no opaque lens discs)');
 
 for (const icon of ['m4-icon.png', 'ammo-icon.png', ...optics.map(r => r + '.png')]) {

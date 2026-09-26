@@ -121,7 +121,7 @@ try {
     $optics = Body (Method $armory 'PatchOptics' '')
     foreach ($target in @('"UseItemOnItem"','"UpdSpecs"')) { if (!($optics -match [Regex]::Escape($target))) { throw "Optic patch target $target not installed" }; $count++ }
     if (!($init -match 'M4Armory::PatchOptics')) { throw 'Optic patches not installed from Initialize' }
-    foreach ($res in @(@('Tony.M4.model.json','M4\Assets\model.json'),@('Tony.M4.icon.png','M4\Assets\m4-icon.png'),@('Tony.M4.ammo.png','M4\Assets\ammo-icon.png'),@('Tony.M4.scope2.png','M4\Assets\scope-reddot.png'),@('Tony.M4.scope3.png','M4\Assets\scope-holo.png'),@('Tony.M4.scope4.png','M4\Assets\scope-acog.png'),@('Tony.M4.scope5.png','M4\Assets\scope-brass.png'),@('Tony.M4.scope6.png','M4\Assets\scope-sniper.png'))) {
+    foreach ($res in @(@('Tony.M4.model.json','M4\Assets\model.json'),@('Tony.M4.icon.png','M4\Assets\m4-icon.png'),@('Tony.M4.ammo.png','M4\Assets\ammo-icon.png'),@('Tony.M4.scope2.png','M4\Assets\scope-reddot.png'),@('Tony.M4.scope5.png','M4\Assets\scope-brass.png'),@('Tony.M4.scope6.png','M4\Assets\scope-sniper.png'))) {
         $r = $mod.MainModule.Resources | Where-Object Name -eq $res[0]
         if (!$r) { throw "Missing resource $($res[0])" }
         $expected = [IO.File]::ReadAllBytes((Join-Path $root $res[1]))

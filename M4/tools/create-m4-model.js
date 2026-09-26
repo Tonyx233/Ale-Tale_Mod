@@ -6,7 +6,7 @@ const W = 1.18; // chunky width factor to match the game's stylised props
 const C = {
   receiver: [.25, .262, .28], metal: [.17, .172, .18], rail: [.3, .31, .325], port: [.06, .06, .065],
   furniture: [.205, .2, .198], mag: [.34, .345, .35], rubber: [.1, .1, .105],
-  scope: [.22, .228, .24], fiber: [.42, .86, .3], lens: [.16, .46, .4], lensRear: [.06, .1, .1], brass: [.72, .52, .2]
+  scope: [.22, .228, .24], brass: [.72, .52, .2]
 };
 const bone = (name, parent, p) => bones.push({ name, parent, p });
 function mesh(name, b, color, role) { const p = { name, bone: b, p: [0, 0, 0], s: [1, 1, 1], r: [0, 0, 0], color, vertices: [], triangles: [] }; if (role) p.role = role; parts.push(p); return p; }
@@ -198,13 +198,6 @@ pipe('Red dot coating', 'rifle', coating, [[0, .086, .1125, .0158, .0142], [0, .
 cyl('Red dot elevation', 'rifle', C.scope, [0, .086 + .0215, .08], 'y', .0065, .008, 10, 'scope-reddot');
 cyl('Red dot windage', 'rifle', C.scope, [.0215, .086, .08], 'x', .0065, .008, 10, 'scope-reddot');
 cyl('Red dot lever', 'rifle', C.metal, [.016 * W, .058, .08], 'x', .005, .008, 8, 'scope-reddot');
-// Holographic box sight with an open window. Sight point = window centre (0, .085, .084).
-prism('Holo base', 'rifle', C.scope, [[.045, .049], [.132, .049], [.132, .066], [.045, .062]], -.0155 * W, .0155 * W, 'scope-holo');
-box('Holo battery', 'rifle', C.scope, [0, .075, .122], [.03 * W, .02, .02], 'scope-holo');
-for (const side of [-1, 1]) box('Holo hood side', 'rifle', C.scope, [side * (.0155 * W - .002), .085, .084], [.004, .038, .048], 'scope-holo');
-box('Holo hood top', 'rifle', C.scope, [0, .107, .084], [.031 * W, .006, .048], 'scope-holo');
-for (const x of [-.006, .006]) box('Holo button', 'rifle', C.rubber, [x, .064, .047], [.008, .006, .006], 'scope-holo');
-box('Holo glass rim', 'rifle', coating, [0, .0665, .084], [.02, .0015, .046], 'scope-holo');
 // Brass rifle scope on picatinny rings (magnified 3x / 6x).
 for (const z of [.04, .14]) {
   box('Brass ring clamp', 'rifle', C.metal, [0, .056, z], [.026 * W, .014, .014], 'scope-brass');
@@ -230,21 +223,6 @@ cyl('Sniper windage', 'rifle', C.scope, [.022, .092, .09], 'x', .01, .014, 12, '
 cyl('Sniper parallax', 'rifle', C.scope, [-.02, .092, .1], 'x', .008, .01, 12, 'scope-sniper');
 loft('Sniper front lens', 'rifle', [.12, .28, .3], [[0, .092, .2752, .023, .023], [0, .092, .276, .023, .023]], 16, 'scope-sniper');
 loft('Sniper rear lens', 'rifle', glassDark, [[0, .092, -.0758, .016, .016], [0, .092, -.075, .016, .016]], 16, 'scope-sniper');
-
-// Trijicon TA31-style 4x32 ACOG on a thumb-nut mount.
-const sy = .086;
-prism('Scope mount', 'rifle', C.scope, [[.04, .049], [.135, .049], [.13, .066], [.045, .066]], -.013 * W, .013 * W, 'scope-acog');
-for (const z of [.06, .115]) cyl('Thumb nut', 'rifle', C.scope, [-.02 * W, .056, z], 'x', .0075, .01, 10, 'scope-acog');
-loft('ACOG body', 'rifle', C.scope, [
-  [0, sy, .028, .0175, .0175], [0, sy, .04, .0182, .0182], [0, sy, .046, .0205, .021], [0, sy, .06, .0225, .0235],
-  [0, sy, .125, .0225, .0235], [0, sy, .138, .0205, .0205], [0, sy, .145, .0228, .0228], [0, sy, .178, .0228, .0228]], 14, 'scope-acog');
-loft('Eye guard', 'rifle', C.rubber, [[0, sy, .016, .0168, .0168], [0, sy, .03, .0172, .0172]], 14, 'scope-acog');
-prism('Fiber housing', 'rifle', C.scope, [[.084, sy + .02], [.142, sy + .02], [.142, sy + .028], [.092, sy + .03], [.084, sy + .028]], -.0065, .0065, 'scope-acog');
-box('Fiber optic', 'rifle', C.fiber, [0, sy + .031, .117], [.008, .003, .046], 'scope-acog');
-cyl('Elevation turret', 'rifle', C.scope, [0, sy + .026, .066], 'y', .0085, .01, 12, 'scope-acog');
-cyl('Windage turret', 'rifle', C.scope, [.026 * W, sy, .084], 'x', .0085, .01, 12, 'scope-acog');
-loft('Objective lens', 'rifle', C.lens, [[0, sy, .1785, .0192, .0192], [0, sy, .1795, .0192, .0192]], 14, 'scope-acog');
-loft('Ocular lens', 'rifle', C.lensRear, [[0, sy, .0155, .0145, .0145], [0, sy, .0165, .0145, .0145]], 14, 'scope-acog');
 
 const tris = parts.reduce((s, p) => s + p.triangles.length / 3, 0);
 fs.writeFileSync(path.join(__dirname, '..', 'Assets', 'model.json'), JSON.stringify({ bones, parts }));

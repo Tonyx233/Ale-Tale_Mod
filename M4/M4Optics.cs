@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace TonyMods
 {
-    // Interchangeable optics: five scope items, attach by dragging a scope onto the rifle in any
+    // Interchangeable optics: three scope items, attach by dragging a scope onto the rifle in any
     // inventory (native use-item-on-item flow), a detach key, and a loadout broadcast so teammates see
     // the optic (remote clients only receive the held item's data ID).
     public sealed partial class M4Armory
@@ -32,8 +32,7 @@ namespace TonyMods
         internal static string ScopeName(M4ScopeKind kind)
         {
             M4ScopeProfile p = M4Scopes.Profile(kind);
-            string name = Text(p.Zh, p.En);
-            return p.Kind == M4ScopeKind.Acog ? name + " " + ScopePower + "×" : name;
+            return Text(p.Zh, p.En);
         }
 
         private void BindOptics(ConfigFile config)
@@ -189,7 +188,7 @@ namespace TonyMods
             return data;
         }
 
-        private static bool ValidKind(byte kind) { return kind >= (byte)M4ScopeKind.Iron && kind <= (byte)M4ScopeKind.Sniper; }
+        private static bool ValidKind(byte kind) { return M4Scopes.IsKind(kind); }
 
         private void ReceiveControl(ulong sender, byte[] data)
         {
@@ -233,7 +232,7 @@ namespace TonyMods
         {
             PlayerNet player = tp != null ? tp.GetComponentInParent<PlayerNet>() : null;
             M4ScopeKind kind;
-            return player != null && remoteScopes.TryGetValue(player.OwnerClientId, out kind) ? kind : M4ScopeKind.Acog;
+            return player != null && remoteScopes.TryGetValue(player.OwnerClientId, out kind) ? kind : M4ScopeKind.Iron;
         }
 
         // ---- Notices ----------------------------------------------------------------------------
@@ -274,7 +273,7 @@ namespace TonyMods
             foreach (M4ScopeKind kind in M4Scopes.ItemKinds)
             {
                 M4ScopeProfile p = M4Scopes.Profile(kind);
-                string stages = string.Join(" / ", M4Scopes.Stages(kind, scopePower.Value).Select(s => s.ToString("0.#") + "×").ToArray());
+                string stages = string.Join(" / ", M4Scopes.Stages(kind).Select(s => s.ToString("0.#") + "×").ToArray());
                 string feature = chinese
                     ? (p.Magnified ? "放大 " + stages + "，右鍵切換倍率。" : "近距離用，開鏡 " + stages + "，槍身直接對準準星。")
                     : (p.Magnified ? "Magnified " + stages + "; right mouse cycles power. " : "Close range, " + stages + ", aims down the real sight. ");

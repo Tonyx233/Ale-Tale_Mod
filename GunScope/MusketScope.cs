@@ -39,7 +39,7 @@ namespace TonyMods
         private Transform hands;
         private Vector3 handsPos;
         private Quaternion handsRot;
-        private Texture2D disc, ring;
+        private Texture2D disc;
         private bool Aligned { get { return optic != null && !optic.Magnified; } }
         private bool aiming { get { return cycle.IsActive; } }
         private bool failed;
@@ -58,7 +58,7 @@ namespace TonyMods
                 Patch("RaycastShot", "BeforeRaycast", true);
                 harmony.Patch(AccessTools.Method(typeof(GunTool), "RaycastShot"), finalizer: new HarmonyMethod(typeof(MusketScope), "AfterRaycast"));
                 harmony.Patch(AccessTools.Method(typeof(PlayerInput), "GetLookInput"), postfix: new HarmonyMethod(typeof(MusketScope), "ScaleLook"));
-                log.LogInfo("Musket scope ready: physical brass scope + 3x / 6x / off aim cycle, M4A1 ACOG single stage; native shot spread preserved.");
+                log.LogInfo("Musket scope ready: physical brass scope + 3x / 6x / off aim cycle, M4A1 per-optic stages; native shot spread preserved.");
             }
             catch { harmony.UnpatchSelf(); harmony = null; throw; }
         }
@@ -105,8 +105,8 @@ namespace TonyMods
 
         private void UseOptic(M4ScopeProfile profile)
         {
-            optic = profile ?? M4Scopes.Profile(M4ScopeKind.Acog);
-            cycle = new ScopeCycle(M4Scopes.Stages(optic.Kind, M4Armory.ScopePower));
+            optic = profile ?? M4Scopes.Profile(M4ScopeKind.Iron);
+            cycle = new ScopeCycle(M4Scopes.Stages(optic.Kind));
         }
 
         // The rifle's optic changed (attach / detach): close the scope and take the new profile.
@@ -236,7 +236,6 @@ namespace TonyMods
         {
             ExitAim(); ads = 0; RestoreHands();
             if (disc != null) Destroy(disc);
-            if (ring != null) Destroy(ring);
             if (model != null) Destroy(model);
             if (metal != null) Destroy(metal);
             if (brass != null) Destroy(brass);
@@ -354,8 +353,7 @@ namespace TonyMods
             GUI.color = Color.white; GUI.DrawTexture(new Rect(x, y, side, side), mask);
             GUI.color = Color.black;
             float line = Mathf.Max(1, Screen.height / 720f), cx = Screen.width / 2f, cy = Screen.height / 2f;
-            if (rifle && optic.Reticle == M4Reticle.Chevron) DrawAcog(cx, cy, side, line);
-            else if (rifle && optic.Reticle == M4Reticle.MilDot) DrawMilDot(cx, cy, side, line);
+            if (rifle && optic.Reticle == M4Reticle.MilDot) DrawMilDot(cx, cy, side, line);
             else
             {
                 GUI.DrawTexture(new Rect(cx - side * .46f, cy - line / 2, side * .92f, line), Texture2D.whiteTexture);
@@ -376,7 +374,6 @@ namespace TonyMods
         {
             if (cam == null || optic.Reticle == M4Reticle.None) return;
             if (disc == null) disc = Circle("Tony sight dot", 64, 0);
-            if (ring == null) ring = Circle("Tony sight ring", 256, .045f);
             Color previous = GUI.color; int depth = GUI.depth; Matrix4x4 matrix = GUI.matrix;
             GUI.matrix = Matrix4x4.identity; GUI.depth = -10000;
             float cx = Screen.width / 2f, cy = Screen.height / 2f, unit = Screen.height / 1080f;
@@ -386,19 +383,6 @@ namespace TonyMods
                 float r = Mathf.Max(2.6f * unit, M4Scopes.MoaToPixels(M4Scopes.DotMoa, cam.fieldOfView, Screen.height));
                 GUI.color = new Color(red.r, red.g, red.b, .22f); GUI.DrawTexture(new Rect(cx - r * 2.4f, cy - r * 2.4f, r * 4.8f, r * 4.8f), disc);
                 GUI.color = red; GUI.DrawTexture(new Rect(cx - r, cy - r, r * 2, r * 2), disc);
-            }
-            else
-            {
-                float rr = Mathf.Max(18 * unit, M4Scopes.MoaToPixels(M4Scopes.HoloRingMoa, cam.fieldOfView, Screen.height));
-                float rd = Mathf.Max(1.8f * unit, M4Scopes.MoaToPixels(M4Scopes.HoloDotMoa, cam.fieldOfView, Screen.height));
-                GUI.color = red;
-                GUI.DrawTexture(new Rect(cx - rr, cy - rr, rr * 2, rr * 2), ring);
-                GUI.DrawTexture(new Rect(cx - rd, cy - rd, rd * 2, rd * 2), disc);
-                float tick = rr * .22f, w = Mathf.Max(1.5f, rr * .09f);
-                GUI.DrawTexture(new Rect(cx - w / 2, cy - rr - tick * .3f, w, tick), Texture2D.whiteTexture);
-                GUI.DrawTexture(new Rect(cx - w / 2, cy + rr - tick * .7f, w, tick), Texture2D.whiteTexture);
-                GUI.DrawTexture(new Rect(cx - rr - tick * .3f, cy - w / 2, tick, w), Texture2D.whiteTexture);
-                GUI.DrawTexture(new Rect(cx + rr - tick * .7f, cy - w / 2, tick, w), Texture2D.whiteTexture);
             }
             GUI.color = previous; GUI.depth = depth; GUI.matrix = matrix;
         }
@@ -442,37 +426,6 @@ namespace TonyMods
             }
             GUI.color = new Color(.85f, .15f, .1f);
             GUI.DrawTexture(new Rect(cx - line, cy - line, line * 2, line * 2), Texture2D.whiteTexture);
-        }
-
-        // TA31-style reticle: red chevron with its tip on the aim point, bullet-drop stadia below.
-        private void DrawAcog(float cx, float cy, float side, float line)
-        {
-            GUI.color = Color.black;
-            GUI.DrawTexture(new Rect(cx - line / 2, cy + side * .075f, line, side * .21f), Texture2D.whiteTexture);
-            float[] widths = { .09f, .07f, .055f, .04f };
-            string[] marks = { "4", "5", "6", "8" };
-            if (zoomLabel == null) zoomLabel = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
-            zoomLabel.fontSize = Mathf.RoundToInt(12 * line); zoomLabel.normal.textColor = Color.black;
-            for (int i = 0; i < widths.Length; i++)
-            {
-                float y = cy + side * (.11f + i * .055f), w = side * widths[i];
-                GUI.DrawTexture(new Rect(cx - w / 2, y - line / 2, w, line), Texture2D.whiteTexture);
-                GUI.Label(new Rect(cx + w / 2 + 2 * line, y - 9 * line, 20 * line, 18 * line), marks[i], zoomLabel);
-            }
-            Color red = new Color(.93f, .27f, .14f);
-            float arm = side * .045f, width = Mathf.Max(2, line * 2.4f);
-            Line(new Vector2(cx, cy), new Vector2(cx - arm * .62f, cy + arm), width, red);
-            Line(new Vector2(cx, cy), new Vector2(cx + arm * .62f, cy + arm), width, red);
-        }
-
-        private static void Line(Vector2 from, Vector2 to, float width, Color color)
-        {
-            Vector2 d = to - from;
-            Matrix4x4 matrix = GUI.matrix;
-            GUIUtility.RotateAroundPivot(Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg, from);
-            GUI.color = color;
-            GUI.DrawTexture(new Rect(from.x, from.y - width / 2, d.magnitude, width), Texture2D.whiteTexture);
-            GUI.matrix = matrix;
         }
     }
 }

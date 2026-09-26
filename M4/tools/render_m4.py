@@ -12,7 +12,7 @@ def load(name):
 FONT = 'C:/Windows/Fonts/msjh.ttc'; FONT_B = 'C:/Windows/Fonts/msjhbd.ttc'
 FDE = {'furniture': [.60, .51, .36], 'mag': [.56, .48, .34]}
 
-SCOPES = ['iron', 'reddot', 'holo', 'acog', 'brass', 'sniper']
+SCOPES = ['iron', 'reddot', 'brass', 'sniper']
 def visible(role, scope):
     # Mirrors M4Model.SetScope: one optic role, raised BUIS only without optic, folded BUIS except under the sniper mount.
     if role is None or not (role.startswith('scope-') or role.startswith('iron-')): return True
@@ -20,7 +20,7 @@ def visible(role, scope):
     if role == 'iron-down': return scope not in ('iron', 'sniper')
     return role == 'scope-' + scope
 
-def world_parts(colorway=None, hide=(), scope='acog', only=None):
+def world_parts(colorway=None, hide=(), scope='iron', only=None):
     bones = {}
     for b in model['bones']:
         bones[b['name']] = np.array(b['p'], float) + (bones[b['parent']] if b['parent'] else 0)
@@ -31,7 +31,7 @@ def world_parts(colorway=None, hide=(), scope='acog', only=None):
         v = np.array(p['vertices'], float).reshape(-1, 3) * p['s'] + np.array(p['p']) + bones[p['bone']]
         v[:, 0] *= -1  # data is Unity left-handed (+X right); mirror into this right-handed rasteriser
         color = np.array(colorway.get(p.get('role'), p['color']) if colorway else p['color'], float)
-        metal = p.get('role') not in ('furniture', 'mag') and p['name'] not in ('Butt pad', 'Eye guard')
+        metal = p.get('role') not in ('furniture', 'mag') and p['name'] != 'Butt pad'
         out.append((i, v, np.array(p['triangles']).reshape(-1, 3)[:, ::-1], color, metal))
     return out
 
@@ -42,7 +42,7 @@ def look(eye, target, up=(0, 1, 0)):
     u = np.cross(r, f)
     return eye, np.stack([r, u, -f])
 
-def render(size, eye, target, scale, persp=None, colorway=None, hide=(), light=(.35, .8, .55), offset=(0, 0), gain=1.0, scope='acog', only=None):
+def render(size, eye, target, scale, persp=None, colorway=None, hide=(), light=(.35, .8, .55), offset=(0, 0), gain=1.0, scope='iron', only=None):
     """Rasterise with a z-buffer at 2x, outline part silhouettes, return RGBA."""
     W, H = size[0] * 2, size[1] * 2
     M = np.array([-1, 1, 1.])  # camera arguments are given in Unity space too
@@ -126,7 +126,7 @@ def sheet(out):
     hero = render((1180, 620), centre + np.array([.95, .42, -.62]), centre, 1140)
     shadow(bg, (170, 700, 1170, 770))
     bg.alpha_composite(hero, (40, 150))
-    d.text((80, 745), '主視角 · 4× ACOG / 30 發 STANAG 彈匣 / 伸縮槍托', font=f_lab, fill=ink)
+    d.text((80, 745), '主視角 · 機械瞄具 / 30 發 STANAG 彈匣 / 伸縮槍托', font=f_lab, fill=ink)
 
     # Right side profile, orthographic, with dimension line.
     prof = render((1180, 430), centre + np.array([2, 0, -.0]), centre + np.array([0, -.045, 0]), 1060)
@@ -188,13 +188,13 @@ def icons():
     fit_icon(can, 0, 220).save(ASSETS / 'ammo-icon.png')
     load('model.json')
 
-SCOPE_NAMES = {'iron': '不裝（機械瞄具）', 'reddot': '紅點', 'holo': '全像', 'acog': 'ACOG 4×', 'brass': '黃銅鏡 3×/6×', 'sniper': '狙擊鏡 3×/6×/9×'}
+SCOPE_NAMES = {'iron': '不裝（機械瞄具，出廠）', 'reddot': '紅點', 'brass': '黃銅鏡 3×/6×', 'sniper': '狙擊鏡 3×/6×/9×'}
 # Sight points and eye distances (M4 metres) from M4/M4Scopes.cs; eye = world eye distance / 0.68 fp scale.
-ADS = {'iron': (.091, .021, .06), 'reddot': (.086, .08, .15), 'holo': (.085, .084, .16)}
+ADS = {'iron': (.091, .021, .06), 'reddot': (.086, .08, .15)}
 
 def scope_sheet(out):
     load('model.json')
-    Wd, Hd = 1800, 1180
+    Wd, Hd = 1800, 130 + (len(SCOPES) + 1) // 2 * 350
     grad = np.linspace(0, 1, Hd)[:, None, None]
     bg = Image.fromarray((np.array([240, 233, 216]) * (1 - grad) + np.array([214, 202, 178]) * grad).repeat(Wd, 1).astype(np.uint8)).convert('RGBA')
     d = ImageDraw.Draw(bg); ink = (48, 38, 30)
@@ -223,15 +223,15 @@ def ads_views(out):
         td.line((290, 300, 310, 300), fill=(255, 0, 0, 255)); td.line((300, 290, 300, 310), fill=(255, 0, 0, 255))
         td.text((12, 10), sc + '  (red cross = screen centre)', font=f_lab, fill=(20, 20, 20))
         tiles.append(tile)
-    sheet = Image.new('RGBA', (1800, 600)); [sheet.alpha_composite(t, (i * 600, 0)) for i, t in enumerate(tiles)]
+    sheet = Image.new('RGBA', (600 * len(tiles), 600)); [sheet.alpha_composite(t, (i * 600, 0)) for i, t in enumerate(tiles)]
     sheet.convert('RGB').save(out, quality=92)
 
 def scope_icons():
     load('model.json')
     for sc in SCOPES[1:]:
-        c = {'reddot': [0, .08, .08], 'holo': [0, .08, .09], 'acog': [0, .09, .1], 'brass': [0, .08, .1], 'sniper': [0, .09, .1]}[sc]
+        c = {'reddot': [0, .08, .08], 'brass': [0, .08, .1], 'sniper': [0, .09, .1]}[sc]
         c = np.array(c)
-        view = np.array([.3, .3, -.62]) if sc == 'holo' else np.array([.55, .35, -.45])  # holo: look into the window
+        view = np.array([.55, .35, -.45])
         img = render((900, 900), c + view, c, 3000, scope=sc, only={'scope-' + sc}, gain=1.35)
         glow(fit_icon(img, 0, 220)).save(ASSETS / ('scope-' + sc + '.png'))
 
