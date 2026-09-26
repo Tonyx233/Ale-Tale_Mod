@@ -98,6 +98,14 @@ namespace TonyMods
             patches.Patch(AccessTools.Method(typeof(PlayerMovement), "HandleCharacterMovement"), prefix: new HarmonyMethod(typeof(TavernHorse), "BeforeMove"), finalizer: new HarmonyMethod(typeof(TavernHorse), "AfterMove"));
             foreach (string name in new[] { "GetJumpInputDown", "GetJumpInputHeld", "GetDashInputDown", "GetCrouchInputDown", "GetCrouchInputHeld", "GetDropInputDown", "GetAutoRunInputDown", "GetUseInputDown", "GetUseInput", "GetUseInputUp" })
                 patches.Patch(AccessTools.Method(typeof(PlayerInput), name), prefix: new HarmonyMethod(typeof(TavernHorse), "FilterAction"));
+            patches.Patch(AccessTools.Method(typeof(PlayerInput), "GetSelectSlotInput"), postfix: new HarmonyMethod(typeof(TavernHorse), "FilterSlot"));
+        }
+        private static bool CtrlHeld() { return Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl); }
+        // Ctrl+1-5 switches seats while riding; keep the native hotbar (1-9, 0 -> 1-10, none -> 0) from equipping that slot.
+        private static void FilterSlot(ref byte __result)
+        {
+            TavernHorse self = Active;
+            if (__result >= 1 && __result <= HorseVariant.Seats(HorseVariant.Extended) && self != null && self.enabledSetting.Value && CtrlHeld()) __result = 0;
         }
         private static bool CanInput()
         {
@@ -143,10 +151,10 @@ namespace TonyMods
             { RestoreRider(); seats.Clear(); receivedSerial = -1; Tell("Waiting for a compatible horse host..."); }
             ApplySeat();
             if (!CanInput()) return;
-            if (localSeat >= 0 && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)))
+            if (localSeat >= 0 && CtrlHeld())
             {
                 for (int seat = 0; seat < seats.Capacity; seat++)
-                    if (Input.GetKeyDown((KeyCode)((int)KeyCode.F1 + seat))) Request(7 + seat);
+                    if (Input.GetKeyDown((KeyCode)((int)KeyCode.Alpha1 + seat))) Request(7 + seat);
             }
             if (Input.GetKeyDown(mountKey.Value) && (localSeat >= 0 || (Active == null && Nearest == this)))
             { consumeFrame = Time.frameCount; Request(localSeat >= 0 ? 2 : 1); }
@@ -379,7 +387,7 @@ namespace TonyMods
             movement.characterVelocity = Vector3.zero; movement.isAutoRunning = false;
             passengerPitch = passengerYaw = 0;
             lastPosition = rider.transform.position;
-            Tell(wanted == 0 ? "Driver: WASD | Shift boost | Jump key | E exit" : "Passenger | E exit | Ctrl+F1: driver | Ctrl+F2-F"+seats.Capacity+": seat");
+            Tell(wanted == 0 ? "Driver: WASD | Shift boost | Jump key | E exit" : "Passenger | E exit | Ctrl+1: driver | Ctrl+2-"+seats.Capacity+": seat");
         }
         private void RestoreRider()
         {
@@ -554,7 +562,7 @@ namespace TonyMods
         private void OnGUI()
         {
             if (network==null || !enabledSetting.Value || (Active != this && Nearest != this)) return;
-            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift | Jump key | E exit | Ctrl+F1-F"+seats.Capacity+": seat" : localSeat>0 ? "Passenger | E exit | Ctrl+F1-F"+seats.Capacity+": seat" : CanInput()&&NearCart() ? "E: Mount horse ("+seats.Count+"/"+seats.Capacity+")"+(pickup!=null&&pickup.IsRemoveAvailable ? " | Hold "+RemoveKeyName()+" on horse: store in inventory" : "") : "";
+            string text=Time.unscaledTime<noticeUntil ? notice : localSeat==0 ? "Driver | WASD | Shift | Jump key | E exit | Ctrl+1-"+seats.Capacity+": seat" : localSeat>0 ? "Passenger | E exit | Ctrl+1-"+seats.Capacity+": seat" : CanInput()&&NearCart() ? "E: Mount horse ("+seats.Count+"/"+seats.Capacity+")"+(pickup!=null&&pickup.IsRemoveAvailable ? " | Hold "+RemoveKeyName()+" on horse: store in inventory" : "") : "";
             if (!String.IsNullOrEmpty(text)) GUI.Box(new Rect(Screen.width/2-270,Screen.height-175,540,35),text);
         }
         private void OnDestroy() { Unbind(); all.Remove(this); }

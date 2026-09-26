@@ -58,7 +58,7 @@ namespace TonyMods
             patches.Patch(AccessTools.Method(typeof(SaveManager), "NewGame"), prefix: new HarmonyMethod(typeof(HorseStable), "BeforeNewGame"));
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             StartCoroutine(Localize());
-            log.LogInfo("Tony horses 0.10.0: original item 47920 (2 seats/4 legs); Horse 2 item 47921 (5 seats/10 legs); E mount; Ctrl+F1-F5 switch seats; hold X on an empty horse to store it.");
+            log.LogInfo("Tony horses 0.10.0: original item 47920 (2 seats/4 legs); Horse 2 item 47921 (5 seats/10 legs); E mount; Ctrl+1-5 switch seats; hold X on an empty horse to store it.");
         }
         private void Update()
         {
@@ -267,7 +267,7 @@ namespace TonyMods
             try { Spawn(record); }
             catch (Exception ex) { log.LogError("Horse creation failed; item retained: " + ex); return; }
             if (!container.RemoveItemAmount(itemId,1)) { Destroy(horses[record.id].gameObject); horses.Remove(record.id); return; }
-            Note(sender,variant == HorseVariant.Extended ? "Horse 2 placed (5 seats). E mounts; Ctrl+F1-F5 changes seats." : "Horse placed. E mounts; Ctrl+F1/F2 changes seats."); Broadcast();
+            Note(sender,variant == HorseVariant.Extended ? "Horse 2 placed (5 seats). E mounts; Ctrl+1-5 changes seats." : "Horse placed. E mounts; Ctrl+1/2 changes seats."); Broadcast();
         }
         private static bool FindGround(PlayerNet player, int variant, out Vector3 ground)
         {
@@ -325,10 +325,10 @@ namespace TonyMods
             var table=handle.Result;if(table==null)yield break;
             bool zh=LocalizationSettings.SelectedLocale!=null && LocalizationSettings.SelectedLocale.Identifier.Code.StartsWith("zh",StringComparison.OrdinalIgnoreCase);
             SetText(table,"TonyHorseName",zh?"牛馬":"Two-seat Horse");
-            SetText(table,"TonyHorseDescription",zh?"可供一位駕駛與一位乘客騎乘。於戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+F1/F2 換位；無人騎乘時對準馬長按 X 收回背包。":"Use from your inventory outdoors to place a horse for a driver and passenger. E mounts, Shift boosts, Ctrl+F1/F2 switches seats. Hold X on an empty horse to store it.");
+            SetText(table,"TonyHorseDescription",zh?"可供一位駕駛與一位乘客騎乘。於戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+1/2 換位；無人騎乘時對準馬長按 X 收回背包。":"Use from your inventory outdoors to place a horse for a driver and passenger. E mounts, Shift boosts, Ctrl+1/2 switches seats. Hold X on an empty horse to store it.");
             SetText(table,"TonyHorseUse",zh?"戶外使用：放置雙人馬":"Use outdoors: place horse");
             SetText(table,"TonyHorse2Name",zh?"牛馬2":"Horse 2");
-            SetText(table,"TonyHorse2Description",zh?"五座十腿牛馬，可供一位駕駛與四位乘客騎乘。於空曠戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+F1～F5 換位；無人騎乘時對準馬長按 X 收回背包。":"Five saddles and ten legs: one driver and four passengers. Use outdoors in a clear area. E mounts, Shift boosts, Ctrl+F1-F5 switches seats. Hold X on an empty horse to store it.");
+            SetText(table,"TonyHorse2Description",zh?"五座十腿牛馬，可供一位駕駛與四位乘客騎乘。於空曠戶外使用背包物品放置；成功後消耗一匹。E 上下馬，Shift 加速，Ctrl+1～5 換位；無人騎乘時對準馬長按 X 收回背包。":"Five saddles and ten legs: one driver and four passengers. Use outdoors in a clear area. E mounts, Shift boosts, Ctrl+1-5 switches seats. Hold X on an empty horse to store it.");
             SetText(table,"TonyHorse2Use",zh?"戶外使用：放置五座十腿牛馬2":"Use outdoors: place five-seat Horse 2");
             // Native look-at prompt (title and "[X] - text") reads the Interactive table.
             var prompts=LocalizationSettings.StringDatabase.GetTableAsync("Interactive"); yield return prompts;

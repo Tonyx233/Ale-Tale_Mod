@@ -8,7 +8,8 @@ $checks=@(
     @('InventoryItemUseManager','UseInventoryItem',4,'System.Void'),
     @('SaveManager','LoadGame',2,'System.Boolean'),
     @('SaveManager','NewGame',1,'System.Void'),
-    @('PlayerMovement','HandleCharacterMovement',0,'System.Void')
+    @('PlayerMovement','HandleCharacterMovement',0,'System.Void'),
+    @('PlayerInput','GetSelectSlotInput',0,'System.Byte')
 )
 foreach($name in @('GetJumpInputDown','GetJumpInputHeld','GetDashInputDown','GetCrouchInputDown','GetCrouchInputHeld','GetFireInputDown','GetFireInputHeld','GetFireInputReleased','GetAimInputDown','GetAimInputHeld','GetAimInputReleased','GetDropInputDown','GetAutoRunInputDown','GetUseInputDown','GetUseInput','GetUseInputUp')) {
     $checks+=,@('PlayerInput',$name,0,'System.Boolean')
