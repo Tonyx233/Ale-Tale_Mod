@@ -16,7 +16,7 @@ im = Image.new('RGB', (1440 * scale, 850 * scale), '#101a25')
 draw = ImageDraw.Draw(im)
 font = ImageFont.truetype('C:/Windows/Fonts/msjh.ttc', 24 * scale)
 small = ImageFont.truetype('C:/Windows/Fonts/msjh.ttc', 17 * scale)
-draw.text((40*scale, 25*scale), '叉潮像 · 實際低面數模型 / 0.16.0', font=font, fill='#ead6af')
+draw.text((40*scale, 25*scale), '十魚架 · 實際低面數模型', font=font, fill='#ead6af')
 for view, angle in enumerate([0, -35, 90]):
     faces = []
     canvas=np.array(im)

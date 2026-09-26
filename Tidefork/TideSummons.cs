@@ -177,7 +177,7 @@ namespace TonyMods
             {
                 float seen;
                 if (peer != network.LocalClientId && (!peers.TryGetValue(peer, out seen) || Time.unscaledTime - seen > 5))
-                { Note(sender, "所有玩家需安裝支援叉潮像的版本；剛加入時請稍候。"); return; }
+                { Note(sender, "所有玩家需安裝支援十魚架的版本；剛加入時請稍候。"); return; }
             }
             Vector3 origin = player.transform.position + Vector3.up * 1.3f;
             Vector3 direction = Quaternion.Euler(0, player.hAngleNet.Value, 0) * Vector3.forward;
@@ -200,7 +200,7 @@ namespace TonyMods
                 if (!container.RemoveItemAmount(itemId, 1)) throw new InvalidOperationException("Item consumption rejected");
                 committed = true; uses[sender] = Now;
                 log.LogInfo("Tidefork summoned: network=" + record.id + "; player=" + sender + "; active=" + creatures.Count);
-                Broadcast(); Note(sender, "已投出叉潮封印球。叉潮像會攻擊所有玩家，包含召喚者！");
+                Broadcast(); Note(sender, "已投出十魚架球。十魚架會攻擊所有玩家，包含召喚者！");
             }
             catch
             {
@@ -337,12 +337,12 @@ namespace TonyMods
             if (handle.Result == null) yield break;
             bool zh = LocalizationSettings.SelectedLocale != null && LocalizationSettings.SelectedLocale.Identifier.Code.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
             string[] keys = { "TonyTideName", "TonyTideDescription", "TonyTideUse" };
-            string[] values = zh ? new[] { "叉潮封印球", "向前投出封印球，召喚會攻擊所有玩家（包含自己）的叉潮像。1000 HP，不會自行消失，需擊殺才會離開；讀檔或換場景時清除。所有玩家需安裝相同版本。", "投擲召喚叉潮像" } :
-                new[] { "Tidefork Seal", "Throw forward to summon a hostile Tidefork Idol. Attacks everyone, including you. 1000 HP; stays until killed, cleared on load or scene change. All players need the same mod version.", "Throw and summon Tidefork Idol" };
+            // Named after the source sculpture; name and caption read the same in every locale.
+            string[] values = { "十魚架球", "十魚架\n天野 裕夫\n平成元年3月", zh ? "投擲召喚十魚架" : "Throw to summon 十魚架" };
             for (int i = 0; i < keys.Length; i++) { var entry = handle.Result.GetEntry(keys[i]); if (entry == null) handle.Result.AddEntry(keys[i], values[i]); else entry.Value = values[i]; }
             var titles = LocalizationSettings.StringDatabase.GetTableAsync("Interactive"); yield return titles;
             if (titles.Result != null)
-            { var entry = titles.Result.GetEntry("TonyTideTitle"); string title = zh ? "叉潮像" : "Tidefork Idol"; if (entry == null) titles.Result.AddEntry("TonyTideTitle", title); else entry.Value = title; }
+            { var entry = titles.Result.GetEntry("TonyTideTitle"); const string title = "十魚架"; if (entry == null) titles.Result.AddEntry("TonyTideTitle", title); else entry.Value = title; }
         }
         private void OnDestroy()
         {
