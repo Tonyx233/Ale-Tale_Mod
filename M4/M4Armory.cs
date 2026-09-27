@@ -62,7 +62,7 @@ namespace TonyMods
             price = config.Bind("M4", "Price", 1, new ConfigDescription("M4A1 merchant price.", new AcceptableValueRange<int>(1, 60000)));
             ammoPrice = config.Bind("M4", "AmmoPrice", 1, new ConfigDescription("Price of one 5.56 purchase.", new AcceptableValueRange<int>(1, 60000)));
             ammoPerPurchase = config.Bind("M4", "AmmoPerPurchase", 1000, new ConfigDescription("5.56 rounds per purchase (native shop sells one full stack).", new AcceptableValueRange<int>(1, 9999)));
-            damage = config.Bind("M4", "Damage", 9, new ConfigDescription("Damage per bullet (musket 35, crossbow 15).", new AcceptableValueRange<int>(1, 255)));
+            damage = config.Bind("M4", "Damage", M4Rules.DefaultDamage, new ConfigDescription("Damage per bullet (musket 35, crossbow 15).", new AcceptableValueRange<int>(1, 255)));
             rpm = config.Bind("M4", "RoundsPerMinute", 750, new ConfigDescription("Full-auto fire rate.", new AcceptableValueRange<int>(M4Rules.MinRpm, M4Rules.MaxRpm)));
             magazine = config.Bind("M4", "MagazineSize", 30, new ConfigDescription("Rounds per magazine. Applies to newly bought rifles and reloads.", new AcceptableValueRange<int>(1, 100)));
             durability = config.Bind("M4", "Durability", 3000, new ConfigDescription("Shots before the rifle breaks (repairable like the musket).", new AcceptableValueRange<int>(10, 60000)));
@@ -73,6 +73,7 @@ namespace TonyMods
             volume = config.Bind("M4", "Volume", .8f, new ConfigDescription("Rifle sound volume, multiplied by the game's sound volume.", new AcceptableValueRange<float>(0f, 1f)));
             modelScale = config.Bind("M4", "ModelScale", .85f, new ConfigDescription("Model size relative to the musket it replaces.", new AcceptableValueRange<float>(.5f, 1.5f)));
             fpOffset = config.Bind("M4", "FirstPersonOffset", "0,0,0", "First-person model nudge in musket mesh units: x (+ towards stock), y (up), z (right).");
+            MigrateDefaults(config);
             BindOptics(config);
             M4Audio.Initialize(logger, volume);
             if (!M4Rifle.ApiReady || HandRig == null || TpAnimator == null) throw new MissingMemberException("GunTool / PlayerAnimTP API changed; M4 disabled");
@@ -104,6 +105,16 @@ namespace TonyMods
             StartCoroutine(Localize());
             log.LogInfo("M4A1 ready: item " + RifleId + " + 5.56 rounds " + AmmoId + "; " + rpm.Value + " RPM, " + damage.Value + " dmg, " + magazine.Value +
                 "-round magazine, iron sights, " + modeKey.Value + " toggles fire mode; optics 47932 / 47935 / 47936 (drag onto the rifle, " + detachKey.Value + " removes).");
+        }
+
+        // A cfg file written by an older build keeps the old defaults; move untouched ones forward once.
+        private void MigrateDefaults(ConfigFile config)
+        {
+            ConfigEntry<int> revision = config.Bind("M4", "DefaultsRevision", 0, "Internal: default-value updates already applied to this file (1 = Damage 9 -> 10). Do not edit.");
+            if (revision.Value >= M4Rules.DefaultsRevision) return;
+            int migrated = M4Rules.MigrateDamage(revision.Value, damage.Value);
+            if (migrated != damage.Value) { log.LogInfo("M4 damage: old default " + damage.Value + " updated to " + migrated + "."); damage.Value = migrated; }
+            revision.Value = M4Rules.DefaultsRevision;
         }
 
         private void Patch(Type type, string target, string handler, bool prefix)

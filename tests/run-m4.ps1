@@ -33,12 +33,20 @@ function Body($method) { $method.Body.Instructions | ForEach-Object ToString }
 try {
     $gun = Def $game 'GunTool'
     foreach ($f in @(@('_state','State'),@('_isReloading','Boolean'),@('_shotTimer','Single'),@('_gunItemId','UInt32'),@('ammoData','ItemData'),
-        @('_fireNoise','Single'),@('_damageDeviation','UInt16'),@('_breakSoundEvent','SoundEvent'),@('endPoint','Transform'),@('fireRate','Single'),
-        @('clipContent','Int32'),@('clipSize','Int32'),@('triggerType','TriggerType'),@('spreadAngle','Single'),@('damage','UInt16'))) { Field $gun $f[0] $f[1] }
+        @('_fireNoise','Single'),@('layerMask','LayerMask'),@('_breakSoundEvent','SoundEvent'),@('endPoint','Transform'),@('fireRate','Single'),
+        @('clipContent','Int32'),@('clipSize','Int32'),@('triggerType','TriggerType'),@('interactiveLayer','Layer'),@('damage','UInt16'))) { Field $gun $f[0] $f[1] }
     foreach ($m in @(@('Fire',''),@('Reload',''),@('CheckReload',''),@('SetItem','Item'),@('Selected',''),@('RaycastShot',''),@('SetState','State'))) { [void](Method $gun $m[0] $m[1]) }
     # The two native limits the M4 patches exist for; if either disappears, re-check the patches.
     $fire = Body (Method $gun 'Fire' '')
     if (!($fire -match 'Animator::SetTrigger') -or !($fire -match 'GunTool::SetState')) { throw 'Native Fire no longer animation-gated; re-check M4 fire patch' }
+    # M4Rifle.Shoot rebuilds RaycastShot: same mask field and 1000 m, triggers ignored (QueryTriggerInteraction 1),
+    # Interactive on hit.transform with the interactiveLayer bits, Vulnerable in the collider's parents.
+    $nativeShot = @((Method $gun 'RaycastShot' '').Body.Instructions)
+    $shotText = @($nativeShot | ForEach-Object ToString)
+    $cast = [Array]::FindIndex($nativeShot, [Predicate[object]]{ param($i) "$($i.Operand)" -match 'Physics::Raycast\(' })
+    if ($cast -lt 1 -or $nativeShot[$cast - 1].OpCode.Code -ne 'Ldc_I4_1' -or !($shotText -match 'GunTool::layerMask') -or !($shotText -match 'GunTool::interactiveLayer') -or
+        !($shotText -match 'ldc.r4 1000$') -or !($shotText -match 'TryGetComponent<Interactive>') -or !($shotText -match 'GetComponentInParent<Vulnerable>')) { throw 'Native RaycastShot contract changed; re-check M4Rifle.Shoot' }
+    [void](Method (Def $game 'Vulnerable') 'Hit' 'UInt16,UInt16,Vector3,Vector3,Vector3,Boolean&,Boolean,Boolean'); Field (Def $game 'Interactive') 'layer' 'Layer'
     $reload = @((Method $gun 'Reload' '').Body.Instructions)
     $add = [Array]::FindIndex($reload, [Predicate[object]]{ param($i) "$($i.Operand)" -match 'AddItemChargeServerRpc' })
     if ($add -lt 1 -or $reload[$add - 1].OpCode.Code -ne 'Ldc_I4_1') { Write-Warning 'Native Reload no longer loads a single round; M4 reload patch may now be redundant' } else { $count++ }
@@ -150,6 +158,19 @@ try {
     $mesh = [Array]::FindIndex([object[]]$scopeGun, [Predicate[object]]{ param($l) $l -match 'ldstr "MusketRoot/Musket/Musket1_2_1"' })
     if ($isM4 -lt 0 -or $mesh -lt 0 -or $isM4 -gt $mesh) { throw 'Scope must recognise the M4 before the musket mesh (M4 is spawned from Musket_fp)' }
     $count++
+    # Hit detection: the viewport-scaled native spread was 1.78x wider sideways, and the native capsule hitboxes
+    # miss 20-55% of some monsters' silhouettes. The M4 shoots a round cone, then a sphere sweep, both without triggers.
+    $shotFire = @(Body (Method $rifle 'Fire' ''))
+    if (($shotFire -match 'GunTool::RaycastShot') -or !($shotFire -match 'M4Rifle::Shoot')) { throw 'M4 Fire must use M4Rifle.Shoot, not the native RaycastShot' }
+    $shoot = @(Body (Method $rifle 'Shoot' 'Single'))
+    $ray = Index $shoot 'Physics::Raycast\('
+    $sphere = Index $shoot 'Physics::SphereCastNonAlloc'
+    if ($ray -lt 1 -or $sphere -lt $ray -or $shoot[$ray - 1] -notmatch 'ldc.i4.1$' -or $shoot[$sphere - 1] -notmatch 'ldc.i4.1$' -or !($shoot -match 'M4Rules::ConeOffset')) { throw 'M4 shot must cast a cone ray, then a sweep, both ignoring triggers' }
+    $target = @(Body (Method $rifle 'Target' 'RaycastHit,Vulnerable&'))
+    if (!($target -match 'TryGetComponent<Interactive>') -or !($target -match 'Interactive::layer') -or !($target -match 'GetComponentInParent<Vulnerable>')) { throw 'M4 target check must follow the native Interactive / Vulnerable contract' }
+    if (!((Body (Method $rifle 'Strike' 'Vulnerable,Vector3,Vector3,Vector3')) -match 'Vulnerable::Hit\(System.UInt16,System.UInt16')) { throw 'M4 strike must call Vulnerable.Hit' }
+    if (!((Body (Method $armory 'MigrateDefaults' 'ConfigFile')) -match 'M4Rules::MigrateDamage') -or !($init -match 'M4Armory::MigrateDefaults')) { throw 'Old Damage = 9 cfg files must be migrated at startup' }
+    $count += 4
     $plugin = Body (Method (Def $mod 'TonyMods.TeammateHealthBars') 'Awake' '')
     if (!($plugin -match 'M4Armory::Initialize')) { throw 'Plugin does not start the M4' }
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $root 'bin\Tony.TeammateHealthBars.dll')).FileVersion

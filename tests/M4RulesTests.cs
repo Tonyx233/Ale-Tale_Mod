@@ -66,15 +66,40 @@ internal static class M4RulesTests
         Check(Near(M4Rules.Spread(5, .35f), M4Rules.Spread(5, 1) * .35f, 1e-6) && M4Rules.Spread(5, 3) == M4Rules.Spread(5, 1), "Aim factor scales spread and is clamped");
         Check(M4Rules.CoolHeat(10, .1f, .05f) == 10, "Heat holds between automatic shots");
         Check(M4Rules.CoolHeat(10, .1f, .5f) < 10 && M4Rules.CoolHeat(1, 5, 1) == 0, "Heat decays to zero");
+        Check(M4Rules.Spread(16, 1) < M4Rules.MaxSpread && Near(M4Rules.Spread(17, 1), M4Rules.MaxSpread, 1e-6), "Full auto reaches the cap on the 18th shot");
+        Check(Near(M4Rules.BaseSpread, .35, 1e-6) && Near(M4Rules.MaxSpread, 1.5, 1e-6), "Hip cone 0.35 deg first shot, 1.5 deg sustained");
+
+        // The shot cone is round and in degrees. The native viewport spread (spreadAngle / FOV) was 1.78x
+        // wider sideways than vertically on 16:9 and reached 6.5 deg sideways at the old 3.2 cap.
+        float cx, cy;
+        double rim = Math.Tan(1.5 * Math.PI / 180);
+        M4Rules.ConeOffset(1.5f, 1, 0, out cx, out cy);
+        Check(Near(cx, rim, 1e-6) && cy == 0, "Sideways cone edge is the spread angle");
+        M4Rules.ConeOffset(1.5f, 0, -1, out cx, out cy);
+        Check(cx == 0 && Near(cy, -rim, 1e-6), "Cone is as tall as it is wide");
+        M4Rules.ConeOffset(1.5f, .6f, .8f, out cx, out cy);
+        Check(Near(Math.Sqrt(cx * cx + cy * cy), rim, 1e-6), "Diagonal edge lies on the same circle");
+        M4Rules.ConeOffset(1.5f, .3f, -.4f, out cx, out cy);
+        Check(Near(Math.Sqrt(cx * cx + cy * cy), rim / 2, 1e-6), "Offsets scale linearly inside the cone");
+        M4Rules.ConeOffset(-2, 1, 1, out cx, out cy);
+        Check(cx == 0 && cy == 0, "Negative spread shoots straight");
+        Check(M4Rules.Range == 1000 && M4Rules.AssistRadius >= .1f && M4Rules.AssistRadius <= .25f, "Native 1000 m range, 0.1-0.25 m hit sweep");
+
+        // Existing cfg files keep Damage = 9: moved to 10 once, a value the player chose is kept.
+        Check(M4Rules.DefaultDamage == 10 && M4Rules.OldDefaultDamage == 9 && M4Rules.DefaultsRevision == 1, "Damage default 10, migration revision 1");
+        Check(M4Rules.MigrateDamage(0, 9) == 10, "Untouched old default becomes 10");
+        Check(M4Rules.MigrateDamage(0, 10) == 10 && M4Rules.MigrateDamage(0, 14) == 14 && M4Rules.MigrateDamage(0, 1) == 1, "Custom damage is kept");
+        Check(M4Rules.MigrateDamage(1, 9) == 9, "9 chosen after the migration stays 9");
 
         Check(Near(M4Rules.Recoil(false, 1), .4, 1e-6) && M4Rules.Recoil(true, 1) < M4Rules.Recoil(false, 1), "Recoil per shot, scoped lighter");
         Check(M4Rules.Recoil(false, -2) == 0, "Negative scale disables recoil");
         Check(Near(M4Rules.ReloadSeconds(true, 2.2f), 2.6, 1e-5) && Near(M4Rules.ReloadSeconds(false, 2.2f), 2.2, 1e-5), "Empty reload adds charging handle");
 
-        // Proposal balance table (wolf 120, OrcMelee 200, SpiderBoss 600).
-        Check(Near(M4Rules.TimeToKill(120, 9, .08f, 30, 2.2f), 1.04, .005), "Recommended vs wolf");
-        Check(Near(M4Rules.TimeToKill(200, 9, .08f, 30, 2.2f), 1.76, .005), "Recommended vs OrcMelee");
-        Check(Near(M4Rules.TimeToKill(600, 9, .08f, 30, 2.2f), 9.68, .005), "Recommended vs SpiderBoss");
+        // Balance table at the default damage (wolf 120, OrcMelee 200, SpiderBoss 600).
+        Check(Near(M4Rules.TimeToKill(120, M4Rules.DefaultDamage, .08f, 30, 2.2f), .88, .005), "Default vs wolf");
+        Check(Near(M4Rules.TimeToKill(200, M4Rules.DefaultDamage, .08f, 30, 2.2f), 1.52, .005), "Default vs OrcMelee");
+        Check(Near(M4Rules.TimeToKill(600, M4Rules.DefaultDamage, .08f, 30, 2.2f), 6.92, .005), "Default vs SpiderBoss");
+        Check(Near(M4Rules.TimeToKill(120, 9, .08f, 30, 2.2f), 1.04, .005), "Old 9-damage default vs wolf");
         Check(Near(M4Rules.TimeToKill(200, 6, .1f, 30, 2.2f), 5.5, .005), "Conservative vs OrcMelee");
         Check(Near(M4Rules.TimeToKill(120, 35, 1.5f, 1, 0), 4.5, .005), "Musket vs wolf");
 

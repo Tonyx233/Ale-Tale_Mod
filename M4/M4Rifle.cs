@@ -9,7 +9,8 @@ using UnityEngine;
 namespace TonyMods
 {
     // Added to the local first-person GunTool spawned for an M4 item. Replaces the native musket
-    // fire/reload flow, which is gated by a 0.5 s fire animation and reloads only one round.
+    // fire/reload flow, which is gated by a 0.5 s fire animation and reloads only one round, and
+    // casts its own shot (see Shoot) instead of the native RaycastShot.
     internal sealed class M4Rifle : MonoBehaviour
     {
         private static readonly FieldInfo StateField = AccessTools.Field(typeof(GunTool), "_state");
@@ -18,10 +19,10 @@ namespace TonyMods
         private static readonly FieldInfo ItemIdField = AccessTools.Field(typeof(GunTool), "_gunItemId");
         private static readonly FieldInfo AmmoField = AccessTools.Field(typeof(GunTool), "ammoData");
         private static readonly FieldInfo NoiseField = AccessTools.Field(typeof(GunTool), "_fireNoise");
-        private static readonly FieldInfo DeviationField = AccessTools.Field(typeof(GunTool), "_damageDeviation");
         private static readonly FieldInfo BreakField = AccessTools.Field(typeof(GunTool), "_breakSoundEvent");
+        private static readonly FieldInfo MaskField = AccessTools.Field(typeof(GunTool), "layerMask");
+        private static readonly FieldInfo TargetLayerField = AccessTools.Field(typeof(GunTool), "interactiveLayer");
         private static readonly MethodInfo SetStateMethod = AccessTools.Method(typeof(GunTool), "SetState");
-        private static readonly MethodInfo RaycastMethod = AccessTools.Method(typeof(GunTool), "RaycastShot");
         private static readonly FieldInfo PitchField = AccessTools.Field(typeof(PlayerMovement), "_cameraVerticalAngle");
         private static readonly FieldInfo BodyField = AccessTools.Field(typeof(PlayerMovement), "playerTransform");
         // Local magazine state survives weapon swaps until the batched inventory RPCs come back.
@@ -34,16 +35,20 @@ namespace TonyMods
             get
             {
                 return StateField != null && ReloadingField != null && ShotTimerField != null && ItemIdField != null && AmmoField != null &&
-                    NoiseField != null && DeviationField != null && BreakField != null && SetStateMethod != null && RaycastMethod != null &&
+                    NoiseField != null && BreakField != null && MaskField != null && TargetLayerField != null && SetStateMethod != null &&
                     PitchField != null && BodyField != null;
             }
         }
 
+        private const float HitMarkerSeconds = .2f;
         private GunTool gun;
         private M4Model model;
         private readonly M4Batch batch = new M4Batch();
         private bool starting;
-        private float heat, lastShot = -10, emptyAt, noiseAt, kick, pitchDebt, yawDebt, noticeUntil;
+        private int mask;
+        private Interactive.Layer targetLayer;
+        private readonly RaycastHit[] sweep = new RaycastHit[16];
+        private float heat, lastShot = -10, emptyAt, noiseAt, kick, pitchDebt, yawDebt, noticeUntil, hitAt = -10;
         private string notice;
         private Coroutine reload;
         private readonly List<Casing> casings = new List<Casing>();
@@ -78,7 +83,9 @@ namespace TonyMods
             }
             gun.fireRate = M4Rules.ShotInterval(M4Armory.Rpm);
             gun.damage = (ushort)M4Armory.Damage;
-            DeviationField.SetValue(gun, (ushort)0);
+            // Musket_fp prefab values: layers 6/11/14/30, and targets whose Interactive has the Vulnerable bit.
+            mask = ((LayerMask)MaskField.GetValue(gun)).value;
+            targetLayer = (Interactive.Layer)TargetLayerField.GetValue(gun);
             gun.projectilePerShot = 1;
             gun.screenShake = false;
             gun.disabledOnEmpty = false;
@@ -130,9 +137,9 @@ namespace TonyMods
             bool scoped = MusketScope.IsScoped(gun);
             M4ScopeProfile optic = M4Scopes.Profile(scope);
             bool hidden = scoped && optic.Magnified;
-            gun.spreadAngle = M4Rules.Spread(heat, scoped ? optic.SpreadFactor : 1);
+            float spread = M4Rules.Spread(heat, scoped ? optic.SpreadFactor : 1);
             heat += 1; lastShot = Time.time;
-            RaycastMethod.Invoke(gun, null);
+            Shoot(spread);
             Remember(gun.clipContent);
             // May re-enter StartReload on the host when the magazine hits zero (see Flush).
             if (M4Rules.ShouldFlush(batch.Charge, 0, gun.clipContent)) Flush();
@@ -149,6 +156,61 @@ namespace TonyMods
                 noiseAt = Time.time + .4f;
                 PlayerNoiseManager.Instance.NoiseServerRpc(transform.position, (float)NoiseField.GetValue(gun), default(ServerRpcParams));
             }
+        }
+
+        // Native RaycastShot rebuilt: camera-centre ray, same layer mask and 1000 m, triggers ignored, first
+        // collider only, Interactive on hit.transform and Vulnerable in its parents. Two changes: the spread is
+        // a round cone in degrees, and a ray that finds no hitbox is swept again as a sphere, which only counts
+        // in front of whatever stopped the ray.
+        private void Shoot(float spread)
+        {
+            PlayerMovement player = PlayerMovement.Instance;
+            Camera view = player != null ? player.mainCamera : null;
+            if (view == null) return;
+            Transform eye = view.transform;
+            Vector2 disc = UnityEngine.Random.insideUnitCircle;
+            float x, y;
+            M4Rules.ConeOffset(spread, disc.x, disc.y, out x, out y);
+            Vector3 origin = eye.position, direction = (eye.forward + eye.right * x + eye.up * y).normalized;
+            RaycastHit hit;
+            Vulnerable target;
+            float reach = M4Rules.Range;
+            if (Physics.Raycast(origin, direction, out hit, reach, mask, QueryTriggerInteraction.Ignore))
+            {
+                if (Target(hit, out target)) { Strike(target, direction, hit.point, hit.normal); return; }
+                reach = hit.distance;
+            }
+            int count = Physics.SphereCastNonAlloc(origin, M4Rules.AssistRadius, direction, sweep, reach, mask, QueryTriggerInteraction.Ignore);
+            int best = -1;
+            Vulnerable chosen = null;
+            for (int i = 0; i < count; i++)
+            {
+                if (best >= 0 && sweep[i].distance >= sweep[best].distance) continue;
+                // Colliders already inside the start sphere report distance 0: only point-blank ones in front count.
+                if (sweep[i].distance <= 0 && Vector3.Dot(sweep[i].collider.bounds.center - origin, direction) <= 0) continue;
+                if (!Target(sweep[i], out target)) continue;
+                best = i; chosen = target;
+            }
+            if (chosen == null) return;
+            if (sweep[best].distance > 0) Strike(chosen, direction, sweep[best].point, sweep[best].normal);
+            else Strike(chosen, direction, sweep[best].collider.bounds.ClosestPoint(origin), -direction);
+        }
+
+        private bool Target(RaycastHit hit, out Vulnerable target)
+        {
+            target = null;
+            Interactive interactive;
+            if (hit.transform == null || !hit.transform.TryGetComponent<Interactive>(out interactive) || (interactive.layer & targetLayer) != targetLayer) return false;
+            target = hit.collider.GetComponentInParent<Vulnerable>();
+            return target != null;
+        }
+
+        // Same call as the native shot: no block check, no crit. success is false on an invincible or dead target.
+        private void Strike(Vulnerable target, Vector3 direction, Vector3 point, Vector3 normal)
+        {
+            bool success;
+            target.Hit(gun.damage, M4Armory.RifleId, direction, point, normal, out success, false, false);
+            if (success) hitAt = Time.unscaledTime;
         }
 
         private void Empty()
@@ -378,7 +440,28 @@ namespace TonyMods
                 GUI.color = new Color(0, 0, 0, .75f); GUI.Label(new Rect(center.x + 2 * unit, center.y + 2 * unit, center.width, center.height), notice, noticeStyle);
                 GUI.color = Color.white; GUI.Label(center, notice, noticeStyle);
             }
+            float age = Time.unscaledTime - hitAt;
+            if (age < HitMarkerSeconds) DrawHitMarker(unit, 1 - age / HitMarkerSeconds);
             GUI.color = previous;
+        }
+
+        // Hit confirmation: a small X around the screen centre (the shot's aim point), fading out.
+        private static void DrawHitMarker(float unit, float alpha)
+        {
+            Matrix4x4 matrix = GUI.matrix;
+            Vector2 centre = new Vector2(Screen.width / 2f, Screen.height / 2f);
+            float gap = 7 * unit, length = 10 * unit, width = Mathf.Max(1.5f, 2 * unit), edge = Mathf.Max(1, unit);
+            GUIUtility.RotateAroundPivot(45, centre);
+            for (int pass = 0; pass < 2; pass++)
+            {
+                float g = pass == 0 ? edge : 0;
+                GUI.color = pass == 0 ? new Color(0, 0, 0, .55f * alpha) : new Color(1, 1, 1, alpha);
+                GUI.DrawTexture(new Rect(centre.x + gap - g, centre.y - width / 2 - g, length + 2 * g, width + 2 * g), Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(centre.x - gap - length - g, centre.y - width / 2 - g, length + 2 * g, width + 2 * g), Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(centre.x - width / 2 - g, centre.y + gap - g, width + 2 * g, length + 2 * g), Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(centre.x - width / 2 - g, centre.y - gap - length - g, width + 2 * g, length + 2 * g), Texture2D.whiteTexture);
+            }
+            GUI.matrix = matrix;
         }
     }
 }
