@@ -1,4 +1,4 @@
-﻿param([string]$GamePath = 'C:\Program Files (x86)\Steam\steamapps\common\Ale and Tale Tavern')
+param([string]$GamePath = 'C:\Program Files (x86)\Steam\steamapps\common\Ale and Tale Tavern')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -100,12 +100,12 @@ try {
  foreach($pattern in @('TideRules::ShotDue','TideSummons::Flight','TideCreature::Splash')){if($land -notmatch [regex]::Escape($pattern)){throw "Missing volley landing gate $pattern"};$count++}
  $splash=Calls (Method $creature 'Splash' 'Vector3')
  foreach($pattern in @('TideRules::InSplash','TideCreature::Blocked','PlayerNet::HitClientRpc','PlayerNet::HitEffectClientRpc')){if($splash -notmatch [regex]::Escape($pattern)){throw "Missing shell hit gate $pattern"};$count++}
- $aim=Calls (Method $creature 'Aim' 'PlayerNet,Vector3,Single,Boolean,Vector3&,Single&')
+ $aim=Calls (Method $creature 'Aim' 'Component,Vector3,Single,Boolean,Vector3&,Single&')
  foreach($pattern in @('TideRules::InShotRange','TideCreature::Ground','TideCreature::ClearArc','TideRules::LeadSeconds')){if($aim -notmatch [regex]::Escape($pattern)){throw "Missing shell aim gate $pattern"};$count++}
- $fire=Calls (Method $creature 'Fire' 'PlayerNet,Vector3,Boolean,Double')
+ $fire=Calls (Method $creature 'Fire' 'Component,Vector3,Boolean,Double')
  foreach($pattern in @('TideCreature::Unlanded','TideCreature::Aim','TideRules::Release','TideSummons/Record::shotAt','TideCreature::Enter')){if($fire -notmatch [regex]::Escape($pattern)){throw "Missing volley start gate $pattern"};$count++}
  if($fire.IndexOf('Record::shotAt') -gt $fire.IndexOf('TideCreature::Enter')){throw 'Volley fields must be set before the action snapshot is marked'}; $count++
- $plan=Calls (Method $creature 'Plan' 'PlayerNet,Double')
+ $plan=Calls (Method $creature 'Plan' 'Component,Double')
  foreach($pattern in @('TideCreature::Aim','TideSummons/Record::shotTo','TideSummons/Record::shotApex','TideSummons::Changed')){if($plan -notmatch [regex]::Escape($pattern)){throw "Missing volley aim gate $pattern"};$count++}
  $enter=Calls (Method $creature 'Enter' 'Byte')
  foreach($pattern in @('TideSummons/Record::shotAt','TideSummons/Record::shotTo')){if($enter -notmatch [regex]::Escape($pattern)){throw 'Death must cancel the volley and shells in the air'};$count++}
@@ -114,12 +114,12 @@ try {
  foreach($pattern in @('TideRules::ValidVolley','TideRules::ValidApex')){if($valid -notmatch [regex]::Escape($pattern)){throw "Missing volley protocol gate $pattern"};$count++}
  # SceneNameMax is a constant, so Valid carries its inlined value.
  if($valid -notmatch "ldc\.i4\.s $sceneMax\b"){throw 'Scene name bound missing'}; $count++
- if((Calls (Method $manager 'Update' '')) -notmatch 'Tony\.Tidefork\.v4'){throw 'Volley snapshots need their own channel version'}; $count++
+ if((Calls (Method $manager 'Update' '')) -notmatch 'Tony\.Tidefork\.v5'){throw 'Volley snapshots need their own channel version'}; $count++
  # Snapshot parts travel as UTF-16 (FastBufferWriter.WriteValueSafe(string) writes two bytes per char). A part
  # of ChunkSize worst-case records must fit UnityTransport's 6144-byte payload used by the LAN/relay managers.
  # A full volley fills the shell arrays to ShotCount entries.
  $shotCount=((TypeDef $mod 'TideRules').Fields | Where-Object Name -eq 'ShotCount').Constant
- $widest=@{UInt64=20;Byte=3;Int32=11;Double=24;Single=15;Vector3=61;String=2+$sceneMax}
+ $widest=@{Boolean=5;UInt64=20;Byte=3;Int32=11;Double=24;Single=15;Vector3=61;String=2+$sceneMax}
  $widest['Vector3[]']=2+$shotCount*$widest.Vector3+$shotCount-1; $widest['Single[]']=2+$shotCount*$widest.Single+$shotCount-1
  function Width($fields){ $chars=2+$fields.Count-1; foreach($f in $fields){ if(!$widest.ContainsKey($f.FieldType.Name)){throw "No JSON width for $($f.FieldType.Name)"}; $chars+=$f.Name.Length+3+$widest[$f.FieldType.Name] }; $chars }
  $record=Width @(($manager.NestedTypes | Where-Object Name -eq 'Record').Fields | Where-Object { $_.IsPublic -and !$_.IsStatic })

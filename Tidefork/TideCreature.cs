@@ -27,7 +27,8 @@ namespace TonyMods
         private Vector3 previousPosition;
         private float speed;
         // Host-side run velocity of the current target, for the shell's lead.
-        private PlayerNet tracked;
+        private Component tracked;
+        private TideFriend friend;
         private Vector3 trackedPosition, trackedVelocity;
         private double trackedAt;
         // Host: the player whose weapon last took HP off the idol, and when (0 = no hunt).
@@ -37,6 +38,7 @@ namespace TonyMods
         internal void Initialize(TideSummons manager, TideSummons.Record record, bool isServer)
         {
             owner = manager; State = record; server = isServer;
+            if (record.friendly && isServer) friend = new TideFriend(this);
             native = GetComponent<CreatureHostile>(); vulnerable = GetComponent<Vulnerable>(); agent = GetComponent<NavMeshAgent>();
             if (native == null || vulnerable == null || agent == null) throw new InvalidOperationException("Native Spider must provide CreatureHostile, Vulnerable and NavMeshAgent");
             native.StopAllCoroutines(); native.enabled = false;
@@ -47,7 +49,7 @@ namespace TonyMods
             foreach (Collider collider in GetComponentsInChildren<Collider>(true)) collider.enabled = false;
             transform.localScale = Vector3.one;
             Interactive interactive = GetComponent<Interactive>();
-            if (interactive != null) interactive.ObjectTitle = "TonyTideTitle";
+            if (interactive != null) interactive.ObjectTitle = record.friendly ? "TonyTideFriendTitle" : "TonyTideTitle";
             RaiseHealthBar();
             hitbox = gameObject.AddComponent<CapsuleCollider>();
             hitbox.center = new Vector3(0, 1.3f, 0); hitbox.radius = .5f; hitbox.height = 2.6f;
@@ -127,8 +129,10 @@ namespace TonyMods
                 State.started += paused; State.born += paused; nextWave += paused; nextPath += paused;
                 nextShot += paused; nextShotPlan += paused; if (State.shotAt > 0) State.shotAt += paused;
                 if (provokedAt > 0) provokedAt += paused;
+                if (friend != null) friend.Pause(paused);
                 return;
             }
+            if (friend != null && !friend.ResolveOwner()) { owner.Remove(this); return; }
             double elapsed = now - State.started;
             if (State.action != TideRules.Death && vulnerable.hp.Value == 0) Enter(TideRules.Death);
             if (State.action == TideRules.Death)
@@ -156,7 +160,7 @@ namespace TonyMods
             {
                 // Stands still for the whole volley; the chase resumes after the last throw while shells still fly.
                 Stop();
-                PlayerNet aim = Target(now);
+                Component aim = Target(now);
                 if (aim != null) Track(aim, now);
                 // A long frame stall can make several shells due at once; aim them all so the volley stays at five.
                 while (planned < TideRules.ShotCount && elapsed >= TideRules.PlanAt(planned)) Plan(aim, now);
@@ -164,8 +168,14 @@ namespace TonyMods
                 return;
             }
             if (!agent.enabled || !agent.isOnNavMesh) { Enter(TideRules.Death); return; }
-            PlayerNet target = Target(now);
-            if (target == null) { Stop(); stranded = false; return; }
+            Component target = Target(now);
+            if (target == null)
+            {
+                stranded = false;
+                if (friend != null) friend.Follow(agent); else Stop();
+                return;
+            }
+            agent.stoppingDistance = TideRules.StopDistance;
             Track(target, now);
             Vector3 delta = target.transform.position - transform.position;
             float height = delta.y; delta.y = 0;
@@ -210,7 +220,7 @@ namespace TonyMods
         // Host: a player's weapon just took HP off this idol. Returns true when that starts a new hunt.
         internal bool Provoke(ulong client)
         {
-            if (!server || State == null || State.action == TideRules.Death) return false;
+            if (!server || State == null || State.friendly || State.action == TideRules.Death) return false;
             double now = TideSummons.Now;
             bool fresh = client != provoker || !TideRules.Provoked(provokedAt, now);
             provoker = client; provokedAt = now;
@@ -218,8 +228,9 @@ namespace TonyMods
         }
         // Whoever is within the search radius comes first, even halfway through a hunt. With nobody near, the last
         // player who hurt the idol is hunted at any distance and height until AggroSeconds pass without a new hit.
-        private PlayerNet Target(double now)
+        private Component Target(double now)
         {
+            if (friend != null) return friend.Target();
             PlayerNet near = Nearest();
             if (near != null || provokedAt <= 0) return near;
             PlayerNet attacker;
@@ -239,7 +250,7 @@ namespace TonyMods
         }
         // 潮彈 volley: aims the first shell and starts the windup. Every shell is fixed when it is aimed and written
         // to the snapshot, so all clients draw the same rings and flights.
-        private bool Fire(PlayerNet target, Vector3 delta, bool anyRange, double now)
+        private bool Fire(Component target, Vector3 delta, bool anyRange, double now)
         {
             if (Unlanded()) return false;
             Vector3 from = transform.position + Vector3.up * TideRules.MuzzleHeight;
@@ -261,7 +272,7 @@ namespace TonyMods
         // Aims the next shell of the volley at the current target (nearest, else the hunted attacker). Later shells
         // finish the volley at any range up to ShotMax; with no target or no clear arc the shell is skipped (apex 0)
         // and the volley goes on.
-        private void Plan(PlayerNet target, double now)
+        private void Plan(Component target, double now)
         {
             int shell = planned++;
             Vector3 to = State.shotFrom; float apex = 0;
@@ -277,7 +288,7 @@ namespace TonyMods
         }
         // Landing point with half lead on the target's run (a lead past a ledge or a wall falls back to the feet),
         // then the highest clear arc to it.
-        private bool Aim(PlayerNet target, Vector3 from, float untilRelease, bool anyRange, out Vector3 to, out float apex)
+        private bool Aim(Component target, Vector3 from, float untilRelease, bool anyRange, out Vector3 to, out float apex)
         {
             Vector3 feet = target.transform.position;
             Vector3 lead = trackedVelocity * TideRules.LeadSeconds(untilRelease, TideSummons.Flight(from, feet)); lead.y = 0;
@@ -356,7 +367,7 @@ namespace TonyMods
             return false;
         }
         // Remote players move by NetworkTransform, so the velocity comes from position deltas.
-        private void Track(PlayerNet target, double now)
+        private void Track(Component target, double now)
         {
             Vector3 position = target.transform.position;
             double dt = now - trackedAt;
@@ -386,7 +397,7 @@ namespace TonyMods
         }
         private static bool Targetable(PlayerNet player)
         { return player != null && player.IsSpawned && player.hp.Value > 0 && !player.isDespawning && !player.isInvisible.Value; }
-        private bool ClearSight(PlayerNet player)
+        private bool ClearSight(Component player)
         {
             Vector3 from = transform.position + Vector3.up * 1.1f, to = player.transform.position + Vector3.up;
             Vector3 direction = to - from;
@@ -401,6 +412,7 @@ namespace TonyMods
         private void Strike(byte action)
         {
             if (!server || PlayerManager.Instance == null || vulnerable.hp.Value == 0) return;
+            if (friend != null) { StrikeFriends(action); return; }
             foreach (PlayerNet player in PlayerManager.Instance.players.Values)
             {
                 if (!Targetable(player)) continue;
@@ -413,6 +425,7 @@ namespace TonyMods
         private void Splash(Vector3 center)
         {
             if (!server || PlayerManager.Instance == null || vulnerable.hp.Value == 0) return;
+            if (friend != null) { SplashFriends(center); return; }
             foreach (PlayerNet player in PlayerManager.Instance.players.Values)
             {
                 if (!Targetable(player)) continue;
@@ -422,6 +435,26 @@ namespace TonyMods
                 // distance re-check as the damage; a new slow replaces a running one instead of stacking.
                 player.HitClientRpc(TideRules.Damage(TideRules.Shot), center, TideRules.Range(TideRules.Shot), false, EffectsController.EffectType.None);
                 player.HitEffectClientRpc(EffectsController.EffectType.Slow, TideRules.ShotSlowSeconds, TideRules.ShotSlowPercent, center, TideRules.Range(TideRules.Shot), false);
+            }
+        }
+        internal void Assist(Vulnerable target) { if (friend != null) friend.Attacked(target); }
+        internal bool Threatens(PlayerNet player)
+        { return !State.friendly && State.action != TideRules.Death && vulnerable.hp.Value > 0 && Target(TideSummons.Now) == player; }
+        private void StrikeFriends(byte action)
+        {
+            foreach (CreatureHostile enemy in friend.Enemies())
+            {
+                Vector3 local = transform.InverseTransformPoint(enemy.transform.position);
+                if (TideRules.InHit(action, local.x, local.z, local.y) && ClearSight(enemy)) friend.Hit(enemy, (ushort)TideRules.Damage(action));
+            }
+        }
+        private void SplashFriends(Vector3 center)
+        {
+            foreach (CreatureHostile enemy in friend.Enemies())
+            {
+                Vector3 offset = enemy.transform.position - center;
+                if (TideRules.InSplash(offset.x, offset.z, offset.y) && !Blocked(center + Vector3.up * .5f, enemy.transform.position + Vector3.up))
+                    friend.Hit(enemy, (ushort)TideRules.Damage(TideRules.Shot));
             }
         }
         private void OnDestroy() { if (model != null) Destroy(model.gameObject); if (hitbox != null) Destroy(hitbox); }

@@ -17,12 +17,14 @@ namespace TonyMods
 {
     public sealed class TideSummons : MonoBehaviour
     {
-        // v3 added the 潮彈 shell, v4 the five-shell volley. Snapshots are split into ChunkSize-record parts because
+        // v5 adds friendly/summoner identity. Snapshots are split into ChunkSize-record parts because
         // the idol count is unbounded; strings travel as UTF-16, and tests/run-tidefork.ps1 keeps a worst-case part
         // under UnityTransport's 6144-byte payload.
-        private const string Channel = "Tony.Tidefork.v4";
-        private const int ChunkSize = 3, MaxParts = 1000;
+        private const string Channel = "Tony.Tidefork.v5";
+        private const int ChunkSize = 2, MaxParts = 1000;
         private static TideSummons instance;
+        private static int petHitDepth;
+        private bool friendReady;
         private ManualLogSource log;
         private Harmony patches;
         private NetworkManager network;
@@ -40,6 +42,8 @@ namespace TonyMods
         [Serializable] public sealed class Record
         {
             public ulong id;
+            public bool friendly;
+            public ulong summoner;
             public string scene;
             public byte action;
             public double started, born;
@@ -51,7 +55,7 @@ namespace TonyMods
             public Vector3[] shotTo;
             public float[] shotApex;
         }
-        [Serializable] public sealed class Snapshot { public int version = 4, sequence, part, parts; public Record[] records; }
+        [Serializable] public sealed class Snapshot { public int version = 5, sequence, part, parts; public Record[] records; }
         internal static double Now { get { return NetworkManager.Singleton == null ? 0 : NetworkManager.Singleton.ServerTime.Time; } }
         internal static bool Owned(Component component) { return component != null && component.GetComponentInParent<TideCreature>() != null; }
 
@@ -67,9 +71,16 @@ namespace TonyMods
             Patch(typeof(Vulnerable), "OnDeath", "NativeCreature");
             Patch(typeof(SaveManager), "LoadGame", "BeforeWorld");
             Patch(typeof(SaveManager), "NewGame", "BeforeWorld");
-            // Without it the idols still work; they just ignore attackers beyond the search radius.
-            try { PatchWeaponHits(); }
-            catch (Exception ex) { log.LogWarning("Tidefork idols will not hunt distant attackers: " + ex.Message); }
+            // Preserve hostile summons if the hook fails, but disable companions without attack attribution.
+            try
+            {
+                PatchWeaponHits();
+                patches.Patch(AccessTools.Method(typeof(PetGuard), "OnAnim"), prefix: new HarmonyMethod(typeof(TideSummons), "BeforePetHit"),
+                    finalizer: new HarmonyMethod(typeof(TideSummons), "AfterPetHit"));
+                friendReady = true;
+                log.LogInfo("Friendly Tidefork ready: item 47941, reusable, one per player, owner-only assistance, protocol v5.");
+            }
+            catch (Exception ex) { log.LogWarning("Tidefork attacker detection unavailable; friendly summons disabled: " + ex.Message); }
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             SceneManager.activeSceneChanged += SceneChanged;
             StartCoroutine(Localize());
@@ -90,15 +101,20 @@ namespace TonyMods
             if (handler == null) throw new MissingMethodException("Vulnerable", "__rpc_handler_3894916604");
             patches.Patch(handler, prefix: new HarmonyMethod(typeof(TideSummons), "BeforeWeaponHit"), postfix: new HarmonyMethod(typeof(TideSummons), "AfterWeaponHit"));
         }
+        // PetGuard sends from the host, but its hits must not be credited to player 0.
+        private static void BeforePetHit(out int __state) { __state = petHitDepth; petHitDepth++; }
+        private static void AfterPetHit(int __state) { petHitDepth = __state; }
         private static void BeforeWeaponHit(NetworkBehaviour target, out ushort __state)
         { var vulnerable = target as Vulnerable; __state = vulnerable == null ? (ushort)0 : vulnerable.hp.Value; }
-        // Only a hit that took HP off an idol counts, so summon invulnerability and rejected weapons start no hunt.
+        // Only accepted player damage authorizes assist targets; rejected weapons/invulnerability do not.
         private static void AfterWeaponHit(NetworkBehaviour target, __RpcParams rpcParams, ushort __state)
         {
             var vulnerable = target as Vulnerable;
-            if (instance == null || vulnerable == null || vulnerable.hp.Value >= __state) return;
+            if (instance == null || petHitDepth > 0 || vulnerable == null || vulnerable.hp.Value >= __state) return;
             TideCreature creature = vulnerable.GetComponent<TideCreature>();
             ulong sender = rpcParams.Server.Receive.SenderClientId;
+            foreach (TideCreature ally in instance.creatures.Values)
+                if (ally != null && ally.State.friendly && ally.State.summoner == sender) ally.Assist(vulnerable);
             if (creature != null && creature.Provoke(sender)) instance.log.LogInfo("Tidefork provoked: network=" + creature.State.id + "; player=" + sender);
         }
         private static bool NativeCreature(Component __instance) { return !Owned(__instance); }
@@ -167,7 +183,21 @@ namespace TonyMods
             item.hotbarItem = false; item.levelDependant = 0; item.questDependant = 0; item.hasRarity = false;
             item.quest = false; item.doNotSave = false; item.playerCantDrop = false;
             item.icon = MakeIcon();
+            RegisterFriend(items, item);
             manager.itemDataHub.itemData = items.ToArray(); ready = true;
+        }
+        private void RegisterFriend(List<ItemData> items, ItemData template)
+        {
+            ItemData item = items.FirstOrDefault(i => i != null && i.id == TideFriendRules.ItemId);
+            if (item != null && item.name != "TonyTideFriendName") throw new InvalidOperationException("Item ID collision: 47941");
+            if (item == null)
+            {
+                item = UnityEngine.Object.Instantiate(template); item.id = TideFriendRules.ItemId;
+                items.Add(item);
+            }
+            item.name = "TonyTideFriendName"; item.itemDescription = "TonyTideFriendDescription"; item.useDescription = "TonyTideFriendUse";
+            item.isInvUseable = true; item.doNotRemoveOnUse = true; item.doNotSave = false;
+            item.shopItem = true; item.buyByOne = true; item.price = TideRules.Price;
         }
         private Sprite MakeIcon()
         {
@@ -188,7 +218,7 @@ namespace TonyMods
         }
         private static bool UseItem(ContainerNet __0, uint __1, ItemData __2, ulong __3)
         {
-            if (__2 == null || __2.id != TideRules.ItemId || instance == null) return true;
+            if (__2 == null || (__2.id != TideRules.ItemId && __2.id != TideFriendRules.ItemId) || instance == null) return true;
             try { instance.Throw(__0, __1, __3); }
             catch (Exception ex) { instance.log.LogError("Tidefork throw failed: " + ex); instance.Note(__3, "召喚失敗，請查看 mod log。"); }
             return false;
@@ -201,9 +231,21 @@ namespace TonyMods
             PlayerNet player; ContainerNet owned; Item item;
             if (!PlayerManager.Instance.players.TryGetValue(sender, out player) || player == null ||
                 !ContainerManager.Instance.GetPlayerContainer(sender, out owned) || !container.GetItemById(itemId, out item, true)) return;
+            bool friendly = item.dataId == TideFriendRules.ItemId;
+            if (friendly && !friendReady) { Note(sender, "友軍功能未通過相容性檢查，請查看 mod log。"); return; }
             double last; if (!uses.TryGetValue(sender, out last)) last = Now - 2;
-            if (!TideRules.CanUse(true, player.IsSpawned && player.hp.Value > 0, container == owned, item.dataId, item.amount, Now - last))
+            if (!TideRules.CanUse(true, player.IsSpawned && player.hp.Value > 0, container == owned, friendly ? TideRules.ItemId : item.dataId, item.amount, Now - last))
             { Note(sender, "無法召喚：每次召喚需間隔 1 秒。"); return; }
+            if (friendly)
+            {
+                TideCreature existing = creatures.Values.FirstOrDefault(c => c != null && c.State.friendly && c.State.summoner == sender);
+                if (existing != null)
+                {
+                    bool alive = existing.GetComponent<Vulnerable>().hp.Value > 0;
+                    Remove(existing);
+                    if (alive) { uses[sender] = Now; Broadcast(); Note(sender, "已收回十魚架(友)，道具保留。"); return; }
+                }
+            }
             foreach (ulong peer in network.ConnectedClientsIds)
             {
                 float seen;
@@ -224,14 +266,14 @@ namespace TonyMods
                 { Note(sender, "怪物生成失敗，道具未消耗。"); return; }
                 if (!spawn.IsSpawned) throw new InvalidOperationException("World is still spawning joining players; retry after joining completes");
                 var record = new Record { id = spawn.NetworkObjectId, scene = SceneManager.GetActiveScene().name, action = TideRules.Summon,
-                    started = Now, born = Now, from = origin, landing = ground };
+                    started = Now, born = Now, from = origin, landing = ground, friendly = friendly, summoner = sender };
                 TideCreature creature = spawn.gameObject.AddComponent<TideCreature>();
                 creature.Initialize(this, record, true);
                 creatures.Add(record.id, creature);
-                if (!container.RemoveItemAmount(itemId, 1)) throw new InvalidOperationException("Item consumption rejected");
+                if (!friendly && !container.RemoveItemAmount(itemId, 1)) throw new InvalidOperationException("Item consumption rejected");
                 committed = true; uses[sender] = Now;
                 log.LogInfo("Tidefork summoned: network=" + record.id + "; player=" + sender + "; active=" + creatures.Count);
-                Broadcast(); Note(sender, "已投出十魚架球。十魚架會攻擊所有玩家，包含召喚者！");
+                Broadcast(); Note(sender, friendly ? "已召喚十魚架(友)。再次使用道具可收回。" : "已投出十魚架球。十魚架會攻擊所有玩家，包含召喚者！");
             }
             catch
             {
@@ -330,7 +372,7 @@ namespace TonyMods
         }
         private static bool Valid(Snapshot snapshot)
         {
-            if (snapshot == null || snapshot.version != 4 || snapshot.records == null || snapshot.records.Length > ChunkSize ||
+            if (snapshot == null || snapshot.version != 5 || snapshot.records == null || snapshot.records.Length > ChunkSize ||
                 snapshot.parts < 1 || snapshot.parts > MaxParts || snapshot.part < 0 || snapshot.part >= snapshot.parts) return false;
             var ids = new HashSet<ulong>();
             double now = Now;
@@ -350,7 +392,7 @@ namespace TonyMods
         internal void Changed() { dirty = true; }
         internal void Remove(TideCreature creature)
         {
-            creatures.Remove(creature.State.id); Changed();
+            creature.Hide(); creatures.Remove(creature.State.id); Changed();
             Spawnable spawn = creature.GetComponent<Spawnable>();
             if (spawn != null && SpawnManager.Instance != null) SpawnManager.Instance.RemoveById(spawn.id.Value, true);
         }
@@ -376,13 +418,17 @@ namespace TonyMods
             var handle = LocalizationSettings.StringDatabase.GetTableAsync("ItemData"); yield return handle;
             if (handle.Result == null) yield break;
             bool zh = LocalizationSettings.SelectedLocale != null && LocalizationSettings.SelectedLocale.Identifier.Code.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
-            string[] keys = { "TonyTideName", "TonyTideDescription", "TonyTideUse" };
+            string[] keys = { "TonyTideName", "TonyTideDescription", "TonyTideUse", "TonyTideFriendName", "TonyTideFriendDescription", "TonyTideFriendUse" };
             // Named after the source sculpture; name and caption read the same in every locale.
-            string[] values = { "十魚架球", "十魚架\n天野 裕夫\n平成元年3月", zh ? "投擲召喚十魚架" : "Throw to summon 十魚架" };
+            string[] values = { "十魚架球", "十魚架\n天野 裕夫\n平成元年3月", zh ? "投擲召喚十魚架" : "Throw to summon 十魚架",
+                "十魚架(友)", "跟隨召喚者，只攻擊威脅主人或被主人攻擊的怪物。每人限一隻；再次使用收回。道具不消耗，死亡後可重新召喚滿血個體。", "召喚／收回十魚架(友)" };
             for (int i = 0; i < keys.Length; i++) { var entry = handle.Result.GetEntry(keys[i]); if (entry == null) handle.Result.AddEntry(keys[i], values[i]); else entry.Value = values[i]; }
             var titles = LocalizationSettings.StringDatabase.GetTableAsync("Interactive"); yield return titles;
             if (titles.Result != null)
-            { var entry = titles.Result.GetEntry("TonyTideTitle"); const string title = "十魚架"; if (entry == null) titles.Result.AddEntry("TonyTideTitle", title); else entry.Value = title; }
+            { var entry = titles.Result.GetEntry("TonyTideTitle"); const string title = "十魚架"; if (entry == null) titles.Result.AddEntry("TonyTideTitle", title); else entry.Value = title;
+                entry = titles.Result.GetEntry("TonyTideFriendTitle");
+                if (entry == null) titles.Result.AddEntry("TonyTideFriendTitle", "十魚架(友)"); else entry.Value = "十魚架(友)";
+            }
         }
         private void OnDestroy()
         {
