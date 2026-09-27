@@ -17,16 +17,18 @@ namespace TonyMods
 {
     public sealed class TideSummons : MonoBehaviour
     {
-        // v5 adds friendly/summoner identity. Snapshots are split into ChunkSize-record parts because
+        // v6 adds the hunting role alongside friendly/summoner identity. Snapshots are split into ChunkSize-record parts because
         // the idol count is unbounded; strings travel as UTF-16, and tests/run-tidefork.ps1 keeps a worst-case part
         // under UnityTransport's 6144-byte payload.
-        private const string Channel = "Tony.Tidefork.v5";
+        private const string Channel = "Tony.Tidefork.v6";
         private const int ChunkSize = 2, MaxParts = 1000;
         private static TideSummons instance;
         private static int petHitDepth;
         private bool friendReady;
         private ManualLogSource log;
         private Harmony patches;
+        private Harmony huntPatches;
+        private bool huntReady;
         private NetworkManager network;
         private bool ready, dirty;
         private float lastSend = -1, nextHello, noticeUntil;
@@ -42,7 +44,7 @@ namespace TonyMods
         [Serializable] public sealed class Record
         {
             public ulong id;
-            public bool friendly;
+            public bool friendly, hunting;
             public ulong summoner;
             public string scene;
             public byte action;
@@ -55,7 +57,7 @@ namespace TonyMods
             public Vector3[] shotTo;
             public float[] shotApex;
         }
-        [Serializable] public sealed class Snapshot { public int version = 5, sequence, part, parts; public Record[] records; }
+        [Serializable] public sealed class Snapshot { public int version = 6, sequence, part, parts; public Record[] records; }
         internal static double Now { get { return NetworkManager.Singleton == null ? 0 : NetworkManager.Singleton.ServerTime.Time; } }
         internal static bool Owned(Component component) { return component != null && component.GetComponentInParent<TideCreature>() != null; }
         // 十魚架(友) on any peer (clients know it from the snapshot): player weapons never hurt it and the M4 shoots through it.
@@ -69,6 +71,9 @@ namespace TonyMods
         {
             instance = this; log = logger;
             patches = new Harmony("Tony.AleTaleMods.Tidefork");
+            huntPatches = new Harmony("Tony.AleTaleMods.TideHunt");
+            try { TideHuntBuilding.Initialize(huntPatches); huntReady = true; }
+            catch (Exception ex) { huntPatches.UnpatchSelf(); log.LogError("Hunting buildings disabled: " + ex); }
             Patch(typeof(ItemManager), "Awake", "Register");
             Patch(typeof(InventoryItemUseManager), "UseInventoryItem", "UseItem");
             // Only our marked instances skip native AI/death. Native weapon/RPC health stays intact.
@@ -84,7 +89,7 @@ namespace TonyMods
                 patches.Patch(AccessTools.Method(typeof(PetGuard), "OnAnim"), prefix: new HarmonyMethod(typeof(TideSummons), "BeforePetHit"),
                     finalizer: new HarmonyMethod(typeof(TideSummons), "AfterPetHit"));
                 friendReady = true;
-                log.LogInfo("Friendly Tidefork ready: item 47941, reusable, one per player, owner-only assistance, immune to player weapons, protocol v5.");
+                log.LogInfo("Friendly Tidefork ready: item 47941, reusable, one per player, owner-only assistance, immune to player weapons, protocol v6.");
             }
             catch (Exception ex) { log.LogWarning("Tidefork attacker detection unavailable; friendly summons disabled: " + ex.Message); }
             // Companions still work without it; native monsters just never turn on them (hostile idols still do).
@@ -197,6 +202,7 @@ namespace TonyMods
             item.quest = false; item.doNotSave = false; item.playerCantDrop = false;
             item.icon = MakeIcon();
             RegisterFriend(items, item);
+            if (huntReady) TideHuntBuilding.Register(items);
             manager.itemDataHub.itemData = items.ToArray(); ready = true;
         }
         private void RegisterFriend(List<ItemData> items, ItemData template)
@@ -251,7 +257,7 @@ namespace TonyMods
             { Note(sender, "無法召喚：每次召喚需間隔 1 秒。"); return; }
             if (friendly)
             {
-                TideCreature existing = creatures.Values.FirstOrDefault(c => c != null && c.State.friendly && c.State.summoner == sender);
+                TideCreature existing = creatures.Values.FirstOrDefault(c => c != null && c.State.friendly && !c.State.hunting && c.State.summoner == sender);
                 if (existing != null)
                 {
                     bool alive = existing.GetComponent<Vulnerable>().hp.Value > 0;
@@ -385,14 +391,14 @@ namespace TonyMods
         }
         private static bool Valid(Snapshot snapshot)
         {
-            if (snapshot == null || snapshot.version != 5 || snapshot.records == null || snapshot.records.Length > ChunkSize ||
+            if (snapshot == null || snapshot.version != 6 || snapshot.records == null || snapshot.records.Length > ChunkSize ||
                 snapshot.parts < 1 || snapshot.parts > MaxParts || snapshot.part < 0 || snapshot.part >= snapshot.parts) return false;
             var ids = new HashSet<ulong>();
             double now = Now;
             foreach (Record r in snapshot.records)
             {
                 int shells = r == null || r.shotTo == null ? 0 : r.shotTo.Length;
-                if (r == null || !ids.Add(r.id) || r.action > TideRules.Shot || String.IsNullOrEmpty(r.scene) || r.scene.Length > TideRules.SceneNameMax ||
+                if (r == null || r.hunting && !r.friendly || !ids.Add(r.id) || r.action > TideRules.Shot || String.IsNullOrEmpty(r.scene) || r.scene.Length > TideRules.SceneNameMax ||
                     !TideRules.Finite(r.started) || !TideRules.Finite(r.born) || r.started < r.born || r.started > now + 5 ||
                     !TideRules.ValidVolley(r.shotAt, shells, r.born, now) || (r.shotApex == null ? 0 : r.shotApex.Length) != shells) return false;
                 var points = new List<Vector3> { r.from, r.landing, r.shotFrom };
@@ -402,6 +408,35 @@ namespace TonyMods
             }
             return true;
         }
+        internal static TideCreature SpawnHunter(TideHuntHome home, Vector3 ground)
+        {
+            var self = instance;
+            if (self == null || self.network == null || !self.network.IsServer || !self.friendReady || !self.huntReady) return null;
+            foreach (ulong peer in self.network.ConnectedClientsIds)
+            {
+                float seen;
+                if (peer != self.network.LocalClientId && (!self.peers.TryGetValue(peer, out seen) || Time.unscaledTime - seen > 5)) return null;
+            }
+            Spawnable spawn = null;
+            try
+            {
+                if (!SpawnManager.Instance.ManualSpawn(Spawnable.Type.Spider, ground, Quaternion.identity, out spawn, true) || spawn == null) return null;
+                if (!spawn.IsSpawned) throw new InvalidOperationException("Hunt spawn deferred");
+                var record = new Record { id = spawn.NetworkObjectId, scene = SceneManager.GetActiveScene().name,
+                    friendly = true, hunting = true, action = TideRules.Summon, started = Now, born = Now, from = ground + Vector3.up, landing = ground };
+                var creature = spawn.gameObject.AddComponent<TideCreature>();
+                creature.Initialize(self, record, true); creature.SetHunter(home);
+                self.creatures.Add(record.id, creature); self.Changed();
+                return creature;
+            }
+            catch
+            {
+                if (spawn != null) SpawnManager.Instance.RemoveById(spawn.id.Value, true);
+                throw;
+            }
+        }
+        internal static void RemoveHunter(TideCreature creature)
+        { if (instance != null && instance.network != null && instance.network.IsServer) instance.Remove(creature); }
         internal void Changed() { dirty = true; }
         // Host: companions that monster attacks can land on (TideCreature.Strike/Splash).
         internal List<TideCreature> Companions()
@@ -439,12 +474,20 @@ namespace TonyMods
             var handle = LocalizationSettings.StringDatabase.GetTableAsync("ItemData"); yield return handle;
             if (handle.Result == null) yield break;
             bool zh = LocalizationSettings.SelectedLocale != null && LocalizationSettings.SelectedLocale.Identifier.Code.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
-            string[] keys = { "TonyTideName", "TonyTideDescription", "TonyTideUse", "TonyTideFriendName", "TonyTideFriendDescription", "TonyTideFriendUse" };
+            string[] keys = { "TonyTideName", "TonyTideDescription", "TonyTideUse", "TonyTideFriendName", "TonyTideFriendDescription", "TonyTideFriendUse", "TonyTideHuntName", "TonyTideHuntDescription" };
             // Named after the source sculpture; name and caption read the same in every locale.
             string[] values = { "十魚架球", "十魚架\n天野 裕夫\n平成元年3月", zh ? "投擲召喚十魚架" : "Throw to summon 十魚架",
-                "十魚架(友)", "跟隨召喚者，只攻擊威脅主人或被主人攻擊的怪物。每人限一隻；再次使用收回。道具不消耗，死亡後可重新召喚滿血個體。", "召喚／收回十魚架(友)" };
+                "十魚架(友)", "跟隨召喚者，只攻擊威脅主人或被主人攻擊的怪物。每人限一隻；再次使用收回。道具不消耗，死亡後可重新召喚滿血個體。", "召喚／收回十魚架(友)",
+                "十魚架(狩獵)", "狩獵基地：隨機狩獵基地100公尺內的自然野生動物與普通怪物。30件戰利品後返回酒館招牌外側放下，繼續出勤。長按啟用／召回；排除任務怪、家畜、NPC與Boss。" };
             for (int i = 0; i < keys.Length; i++) { var entry = handle.Result.GetEntry(keys[i]); if (entry == null) handle.Result.AddEntry(keys[i], values[i]); else entry.Value = values[i]; }
             var titles = LocalizationSettings.StringDatabase.GetTableAsync("Interactive"); yield return titles;
+            if (titles.Result != null)
+            {
+                string[] huntKeys = { "TonyTideHuntName", "TonyTideHuntStart", "TonyTideHuntStop" };
+                string[] huntText = { "十魚架(狩獵)", "開始狩獵", "停止狩獵並返回交貨" };
+                for (int i = 0; i < huntKeys.Length; i++)
+                { var entry = titles.Result.GetEntry(huntKeys[i]); if (entry == null) titles.Result.AddEntry(huntKeys[i], huntText[i]); else entry.Value = huntText[i]; }
+            }
             if (titles.Result != null)
             { var entry = titles.Result.GetEntry("TonyTideTitle"); const string title = "十魚架"; if (entry == null) titles.Result.AddEntry("TonyTideTitle", title); else entry.Value = title;
                 entry = titles.Result.GetEntry("TonyTideFriendTitle");
@@ -455,6 +498,7 @@ namespace TonyMods
         {
             Clear(true); Disconnect();
             if (patches != null) patches.UnpatchSelf();
+            if (huntPatches != null) huntPatches.UnpatchSelf();
             LocalizationSettings.SelectedLocaleChanged -= LocaleChanged; SceneManager.activeSceneChanged -= SceneChanged;
             if (icon != null) Destroy(icon); if (iconTexture != null) Destroy(iconTexture);
             if (instance == this) instance = null;

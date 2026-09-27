@@ -29,6 +29,8 @@ namespace TonyMods
         // Host-side run velocity of the current target, for the shell's lead.
         private Component tracked;
         private TideFriend friend;
+        private TideHunter hunter;
+        internal void SetHunter(TideHuntHome home) { hunter = new TideHunter(this, home); }
         private Vector3 trackedPosition, trackedVelocity;
         private double trackedAt;
         // Host: the player whose weapon last took HP off the idol, and when (0 = no hunt).
@@ -44,7 +46,7 @@ namespace TonyMods
         internal void Initialize(TideSummons manager, TideSummons.Record record, bool isServer)
         {
             owner = manager; State = record; server = isServer;
-            if (record.friendly && isServer) friend = new TideFriend(this);
+            if (record.friendly && !record.hunting && isServer) friend = new TideFriend(this);
             native = GetComponent<CreatureHostile>(); vulnerable = GetComponent<Vulnerable>(); agent = GetComponent<NavMeshAgent>();
             if (native == null || vulnerable == null || agent == null) throw new InvalidOperationException("Native Spider must provide CreatureHostile, Vulnerable and NavMeshAgent");
             native.StopAllCoroutines(); native.enabled = false;
@@ -55,7 +57,7 @@ namespace TonyMods
             foreach (Collider collider in GetComponentsInChildren<Collider>(true)) collider.enabled = false;
             transform.localScale = Vector3.one;
             Interactive interactive = GetComponent<Interactive>();
-            if (interactive != null) interactive.ObjectTitle = record.friendly ? "TonyTideFriendTitle" : "TonyTideTitle";
+            if (interactive != null) interactive.ObjectTitle = record.hunting ? "TonyTideHuntName" : record.friendly ? "TonyTideFriendTitle" : "TonyTideTitle";
             RaiseHealthBar();
             hitbox = gameObject.AddComponent<CapsuleCollider>();
             hitbox.center = new Vector3(0, 1.3f, 0); hitbox.radius = .5f; hitbox.height = 2.6f;
@@ -138,8 +140,10 @@ namespace TonyMods
                 if (provokedAt > 0) provokedAt += paused;
                 if (foeAt > 0) foeAt += paused;
                 if (friend != null) friend.Pause(paused);
+                if (hunter != null) hunter.Pause(paused);
                 return;
             }
+            if (hunter != null && !hunter.Ready) { owner.Remove(this); return; }
             if (friend != null && !friend.ResolveOwner()) { owner.Remove(this); return; }
             double elapsed = now - State.started;
             if (State.action != TideRules.Death && vulnerable.hp.Value == 0) Enter(TideRules.Death);
@@ -180,7 +184,7 @@ namespace TonyMods
             if (target == null)
             {
                 stranded = false;
-                if (friend != null) friend.Follow(agent); else Stop();
+                if (hunter != null) hunter.Move(agent); else if (friend != null) friend.Follow(agent); else Stop();
                 return;
             }
             agent.stoppingDistance = TideRules.StopDistance;
@@ -248,6 +252,7 @@ namespace TonyMods
         // player who hurt the idol is hunted at any distance and height until AggroSeconds pass without a new hit.
         private Component Target(double now)
         {
+            if (State.hunting) return hunter == null ? null : hunter.Target();
             if (friend != null) return friend.Target();
             if (foe != null && foeAt > 0)
             {
@@ -270,6 +275,7 @@ namespace TonyMods
             if (action == TideRules.Death) { State.shotAt = 0; State.shotTo = null; State.shotApex = null; planned = splashed = 0; }
             // A dead companion lets go of the monsters it pulled; they return to their native targets.
             if (action == TideRules.Death && State.friendly) ReleaseTaunts();
+            if (action == TideRules.Death && hunter != null) hunter.Died();
             if (action != TideRules.Walk) Stop();
             owner.Changed();
         }
@@ -437,6 +443,7 @@ namespace TonyMods
         private void Strike(byte action)
         {
             if (!server || PlayerManager.Instance == null || vulnerable.hp.Value == 0) return;
+            if (State.hunting) { StrikeHunt(action, Vector3.zero, false); return; }
             if (friend != null) { StrikeFriends(action); return; }
             foreach (PlayerNet player in PlayerManager.Instance.players.Values)
             {
@@ -456,6 +463,7 @@ namespace TonyMods
         private void Splash(Vector3 center)
         {
             if (!server || PlayerManager.Instance == null || vulnerable.hp.Value == 0) return;
+            if (State.hunting) { StrikeHunt(TideRules.Shot, center, true); return; }
             if (friend != null) { SplashFriends(center); return; }
             foreach (PlayerNet player in PlayerManager.Instance.players.Values)
             {
@@ -517,6 +525,20 @@ namespace TonyMods
                 Vector3 offset = enemy.transform.position - center;
                 if (TideRules.InSplash(offset.x, offset.z, offset.y) && !Blocked(center + Vector3.up * .5f, enemy.transform.position + Vector3.up))
                     friend.Hit(enemy, (ushort)TideRules.Damage(TideRules.Shot));
+            }
+        }
+        private void StrikeHunt(byte action, Vector3 center, bool splash)
+        {
+            if (hunter == null) return;
+            foreach (Spawnable spawn in new System.Collections.Generic.List<Spawnable>(TideHuntBuilding.Natural))
+            {
+                if (spawn == null) continue;
+                CreatureBase enemy = spawn.GetComponent<CreatureBase>();
+                if (!hunter.Allowed(enemy, true)) continue;
+                Vector3 p = splash ? enemy.transform.position - center : transform.InverseTransformPoint(enemy.transform.position);
+                bool shape = splash ? TideRules.InSplash(p.x, p.z, p.y) : TideRules.InHit(action, p.x, p.z, p.y);
+                bool visible = splash ? !Blocked(center + Vector3.up * .5f, enemy.transform.position + Vector3.up) : ClearSight(enemy);
+                if (shape && visible) hunter.Hit(enemy, (ushort)TideRules.Damage(action));
             }
         }
         private void OnDestroy() { if (model != null) Destroy(model.gameObject); if (hitbox != null) Destroy(hitbox); }

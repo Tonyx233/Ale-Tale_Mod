@@ -24,7 +24,7 @@ namespace TonyMods
             public byte action;
             public double started, born;
             public Vector3 from, landing;
-            public bool friendly;
+            public bool friendly, hunting;
         }
         private void Remove(TideCreature c) { creatures.Remove(c.State.id); SpawnManager.Instance.RemoveById((ushort)c.State.id, true); }
         private static bool Landing(Vector3 feet, Vector3 origin, Vector3 direction, out Vector3 ground) { ground = feet; return landingWorks; }
@@ -84,6 +84,13 @@ namespace TonyMods
             Check(host.item.amount == 2 && host.removals == 1 && manager.creatures.Count == 2, "original hostile item still consumes one and coexists");
             Now += 2; manager.Throw(host, 1, 0);
             Check(host.item.amount == 1 && manager.creatures.Count == 3, "original hostile summons remain uncapped");
+            var hunter = new TideCreature { State = new Record { id = 60000, friendly = true, hunting = true, summoner = 0 } };
+            manager.creatures.Add(hunter.State.id, hunter);
+            host.item.dataId = TideFriendRules.ItemId;
+            Now += 2; manager.Throw(host, 1, 0);
+            Check(manager.creatures.ContainsKey(60000) && manager.creatures.Values.Any(c => c.State.friendly && !c.State.hunting && c.State.summoner == 0), "building hunter does not occupy companion slot");
+            Now += 2; manager.Throw(host, 1, 0);
+            Check(manager.creatures.ContainsKey(60000) && !manager.creatures.Values.Any(c => c.State.friendly && !c.State.hunting && c.State.summoner == 0), "recalling companion leaves building hunter alone");
             Console.WriteLine("PASS: " + checks + " production summon/recall, per-owner limit, failures and non-consumption checks");
         }
     }

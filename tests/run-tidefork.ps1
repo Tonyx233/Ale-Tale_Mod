@@ -115,7 +115,7 @@ try {
  foreach($pattern in @('TideRules::ValidVolley','TideRules::ValidApex')){if($valid -notmatch [regex]::Escape($pattern)){throw "Missing volley protocol gate $pattern"};$count++}
  # SceneNameMax is a constant, so Valid carries its inlined value.
  if($valid -notmatch "ldc\.i4\.s $sceneMax\b"){throw 'Scene name bound missing'}; $count++
- if((Calls (Method $manager 'Update' '')) -notmatch 'Tony\.Tidefork\.v5'){throw 'Volley snapshots need their own channel version'}; $count++
+ if((Calls (Method $manager 'Update' '')) -notmatch 'Tony\.Tidefork\.v6'){throw 'Volley snapshots need their own channel version'}; $count++
  # Snapshot parts travel as UTF-16 (FastBufferWriter.WriteValueSafe(string) writes two bytes per char). A part
  # of ChunkSize worst-case records must fit UnityTransport's 6144-byte payload used by the LAN/relay managers.
  # A full volley fills the shell arrays to ShotCount entries.
