@@ -65,5 +65,46 @@ try {
     Require (Body $mod M4Rifle Shoot) 'TideSummons::Friendly' 'M4 bullets must pass through the companion'
     Require (Body $mod M4Rifle Target) 'TideSummons::Friendly' 'M4 sweep must never pick the companion'
     Require (Body $mod TideFriend Follow) 'TideFriend::lastFollow' 'Follow must restart stuck timing after a fight'
+    # Monsters fight back (0.20.0): native melee monsters get the idol as their defence-quest target, hostile idols
+    # answer the companion that hit them, and everything is released before the idol dies or despawns.
+    Require (Body $mod TideFriend Hit) '(?s)TideFriend::Eligible.*Vulnerable::Hit\(System.UInt16,System.UInt16\).*TideCreature::Taunt' 'Monsters must turn on the idol after its hit (native OnHit runs inside the hit)'
+    Require (Body $mod TideFriend Eligible) 'TideCreature::ChasedBy' 'The idol must fight back whatever attacks it'
+    $taunt = Body $mod TideCreature Taunt
+    Require $taunt 'TideCreature::ProvokeBy' 'Hostile idols must answer the companion that hit them'
+    Require $taunt 'TideTaunt::Pull' 'Native monsters must be pulled onto the companion'
+    Require (Body $mod TideCreature Hide) 'TideCreature::ReleaseTaunts' 'Recall/despawn must release pulled monsters before destruction'
+    Require (Body $mod TideCreature Enter) 'TideCreature::ReleaseTaunts' 'A dead companion must release pulled monsters'
+    Require (Body $mod TideCreature Wound) 'Vulnerable::Hit\(System.UInt16,System.UInt16\)' 'Monster attacks on the companion use the native creature hit'
+    foreach ($name in 'Strike','Splash') { Require (Body $mod TideCreature $name) '(?s)PlayerNet::HitClientRpc.*TideSummons::Companions.*TideCreature::Wound' "Hostile $name must also land on companions" }
+    Require (Body $mod TideCreature Target) 'ldfld .*TideCreature::foe' 'Hostile idols must target the companion that hit them'
+    Require (Body $mod TideCreature Provoke) 'stfld .*TideCreature::foe' 'A player hit must pull a hostile idol back off the companion'
+    $resolve = Body $mod TideTaunt Resolve
+    foreach ($member in '_hasChasedVulnerable','_chasedVulnerable','_hasChasedPlayer','_chasedTarget','_hasChasedTarget','SetChasedVulnerable','RemoveChasedPlayer') { Require $resolve ('ldstr "' + $member + '"') "TideTaunt must resolve $member" }
+    $hostile = $game.MainModule.Types | Where-Object Name -eq 'CreatureHostile'
+    foreach ($f in @(@('_hasChasedVulnerable','System.Boolean'), @('_chasedVulnerable','Vulnerable'), @('_hasChasedPlayer','System.Boolean'), @('_chasedTarget','UnityEngine.Transform'), @('_hasChasedTarget','System.Boolean'))) {
+        Require "$(($hostile.Fields | Where-Object Name -eq $f[0]).FieldType.FullName)" ('^' + [regex]::Escape($f[1]) + '$') "CreatureHostile.$($f[0]) changed"
+    }
+    Require (Body $game CreatureHostile SetChasedVulnerable) '(?s)_chasedVulnerable.*_hasChasedVulnerable.*_chasedTarget.*_hasChasedTarget' 'SetChasedVulnerable no longer retargets the chase'
+    Require (Body $game CreatureHostile RemoveChasedPlayer) '(?s)stfld System.Boolean CreatureHostile::_hasChasedPlayer.*ldfld System.Boolean CreatureHostile::_hasChasedVulnerable.*stfld System.Boolean CreatureHostile::_hasChasedTarget' 'RemoveChasedPlayer no longer keeps a Vulnerable target'
+    Require (Body $game CreatureHostile OnAnim) '(?s)ldstr "Hit".*CreatureHostile::_hasChasedVulnerable.*Vulnerable::Hit\(System.UInt16,System.UInt16\)' 'Native melee no longer hits a chased Vulnerable'
+    Require (Body $game CreatureBase OnHpChanged) 'CreatureBase::OnHit' 'Native retarget must run inside the hit, before the taunt'
+    $state = (($game.MainModule.Types | Where-Object Name -eq 'CreatureBase').NestedTypes | Where-Object Name -eq 'State').Fields
+    foreach ($pair in @(@('Idle',1), @('Walk',2), @('Chase',4), @('Tired',5), @('Attack',6), @('WalkToSpecificPoint',11))) {
+        Require "$(($state | Where-Object Name -eq $pair[0]).Constant)" ('^' + $pair[1] + '$') "CreatureBase.State.$($pair[0]) renumbered"
+    }
+    # Every kind the idol may taunt still exists, is a CreatureHostile, keeps the native Attack coroutine and lets its
+    # regular "Hit" anim event reach CreatureHostile.OnAnim. SpiderBoss, bosses and ranged casters stay excluded.
+    $kinds = @((Body $mod TideFriendRules '.cctor') -split "`n" | Where-Object { $_ -match 'ldstr "(\w+)"' } | ForEach-Object { ([regex]::Match($_, 'ldstr "(\w+)"')).Groups[1].Value })
+    Require "$($kinds.Count)" '^8$' 'Tauntable list changed; re-check every kind against the native code'
+    foreach ($kind in $kinds) {
+        $t = $game.MainModule.Types | Where-Object Name -eq $kind
+        if (!$t) { throw "Tauntable $kind missing" }
+        $script:count++
+        if ($kind -eq 'CreatureHostile') { continue }
+        if ("$($t.BaseType)" -ne 'CreatureHostile') { throw "$kind is no longer a CreatureHostile" }
+        if ($t.Methods | Where-Object Name -eq 'Attack') { throw "$kind overrides Attack" }
+        $anim = @($t.Methods | Where-Object Name -eq 'OnAnim')
+        if ($anim.Count -and !((($anim[0].Body.Instructions | ForEach-Object ToString) -join "`n") -match 'CreatureHostile::OnAnim')) { throw "$kind OnAnim skips the native Hit handler" }
+    }
     "PASS: $count companion native API, damage routing, lifecycle and packaging checks"
 } finally { $mod.Dispose(); $game.Dispose() }

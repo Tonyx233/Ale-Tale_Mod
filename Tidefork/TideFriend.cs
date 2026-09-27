@@ -52,6 +52,8 @@ namespace TonyMods
             // Enemy Tideforks disable native AI; ask their actual controller instead.
             TideCreature tide = enemy.GetComponent<TideCreature>();
             if (tide != null) threat = tide.Threatens(Master);
+            // Whatever turned on the idol itself (see TideCreature.Taunt) is fought back as well.
+            threat = threat || body.ChasedBy(enemy);
             double at; if (!attacked.TryGetValue(enemy, out at)) at = -1;
             return TideFriendRules.Authorized(true, false, hp != null && hp.hp.Value > 0 && hp.isActive.Value && !hp.invinsible.Value,
                 threat, at, TideSummons.Now) && Vector3.Distance(enemy.transform.position, Master.transform.position) <= TideFriendRules.Leash;
@@ -125,7 +127,10 @@ namespace TonyMods
         internal void Hit(CreatureHostile enemy, ushort damage)
         {
             // Recheck at impact, including splashes: unrelated neighbours must never take collateral damage.
-            if (Eligible(enemy)) enemy.GetComponent<Vulnerable>().Hit(damage, 0);
+            if (!Eligible(enemy)) return;
+            enemy.GetComponent<Vulnerable>().Hit(damage, 0);
+            // Monsters fight back: whatever the idol hurts turns on it.
+            body.Taunt(enemy);
         }
     }
 }

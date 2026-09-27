@@ -34,6 +34,12 @@ namespace TonyMods
         // Host: the player whose weapon last took HP off the idol, and when (0 = no hunt).
         private ulong provoker;
         private double provokedAt;
+        // Host, hostile idol: the 十魚架(友) that last hurt it, and when (0 = none). Like native monsters it turns on the
+        // companion that hits it, until a player's weapon pulls it back (Provoke).
+        private TideCreature foe;
+        private double foeAt;
+        // Host, friendly idol: native monsters it turned on itself, released before it dies or despawns.
+        private readonly System.Collections.Generic.HashSet<CreatureHostile> taunted = new System.Collections.Generic.HashSet<CreatureHostile>();
 
         internal void Initialize(TideSummons manager, TideSummons.Record record, bool isServer)
         {
@@ -100,7 +106,8 @@ namespace TonyMods
         }
         internal void Apply(TideSummons.Record record)
         { State = record; hidden = false; if (model != null) model.gameObject.SetActive(true); }
-        internal void Hide() { hidden = true; if (model != null) model.gameObject.SetActive(false); if (hitbox != null) hitbox.enabled = false; }
+        // Every recall/despawn path (Remove, Clear) goes through here, before the NetworkObject is destroyed.
+        internal void Hide() { ReleaseTaunts(); hidden = true; if (model != null) model.gameObject.SetActive(false); if (hitbox != null) hitbox.enabled = false; }
         private void Update()
         {
             if (hidden || State == null || model == null) return;
@@ -129,6 +136,7 @@ namespace TonyMods
                 State.started += paused; State.born += paused; nextWave += paused; nextPath += paused;
                 nextShot += paused; nextShotPlan += paused; if (State.shotAt > 0) State.shotAt += paused;
                 if (provokedAt > 0) provokedAt += paused;
+                if (foeAt > 0) foeAt += paused;
                 if (friend != null) friend.Pause(paused);
                 return;
             }
@@ -224,13 +232,28 @@ namespace TonyMods
             double now = TideSummons.Now;
             bool fresh = client != provoker || !TideRules.Provoked(provokedAt, now);
             provoker = client; provokedAt = now;
+            // Native monsters hit by a player go after the nearest player again, dropping a defence target.
+            foe = null; foeAt = 0;
             return fresh;
         }
+        // Host: a 十魚架(友) just took HP off this hostile idol; it answers that companion first (see Target).
+        internal void ProvokeBy(TideCreature companion)
+        {
+            if (!server || State == null || State.friendly || !Standing || companion == null) return;
+            foe = companion; foeAt = TideSummons.Now;
+        }
+        internal bool Standing
+        { get { return !hidden && State != null && State.action != TideRules.Death && State.action != TideRules.Summon && vulnerable != null && vulnerable.hp.Value > 0; } }
         // Whoever is within the search radius comes first, even halfway through a hunt. With nobody near, the last
         // player who hurt the idol is hunted at any distance and height until AggroSeconds pass without a new hit.
         private Component Target(double now)
         {
             if (friend != null) return friend.Target();
+            if (foe != null && foeAt > 0)
+            {
+                if (TideRules.Provoked(foeAt, now) && foe.Standing) return foe;
+                foe = null; foeAt = 0;
+            }
             PlayerNet near = Nearest();
             if (near != null || provokedAt <= 0) return near;
             PlayerNet attacker;
@@ -245,6 +268,8 @@ namespace TonyMods
             State.action = action; State.started = TideSummons.Now; hit = false; previousAge = 0;
             // Dead idols stop attacking, including shells still in the air and the rest of the volley.
             if (action == TideRules.Death) { State.shotAt = 0; State.shotTo = null; State.shotApex = null; planned = splashed = 0; }
+            // A dead companion lets go of the monsters it pulled; they return to their native targets.
+            if (action == TideRules.Death && State.friendly) ReleaseTaunts();
             if (action != TideRules.Walk) Stop();
             owner.Changed();
         }
@@ -421,6 +446,12 @@ namespace TonyMods
                 // Same authoritative-to-owner damage path as CreatureHostile. One call per target per attack.
                 player.HitClientRpc(TideRules.Damage(action), transform.position, TideRules.Range(action), true, EffectsController.EffectType.None);
             }
+            // Companions standing in the attack take it too, the same way monsters hit a defence target.
+            foreach (TideCreature companion in owner.Companions())
+            {
+                Vector3 local = transform.InverseTransformPoint(companion.transform.position);
+                if (TideRules.InHit(action, local.x, local.z, local.y) && ClearSight(companion)) companion.Wound(TideRules.Damage(action));
+            }
         }
         private void Splash(Vector3 center)
         {
@@ -436,10 +467,41 @@ namespace TonyMods
                 player.HitClientRpc(TideRules.Damage(TideRules.Shot), center, TideRules.Range(TideRules.Shot), false, EffectsController.EffectType.None);
                 player.HitEffectClientRpc(EffectsController.EffectType.Slow, TideRules.ShotSlowSeconds, TideRules.ShotSlowPercent, center, TideRules.Range(TideRules.Shot), false);
             }
+            foreach (TideCreature companion in owner.Companions())
+            {
+                Vector3 offset = companion.transform.position - center;
+                if (TideRules.InSplash(offset.x, offset.z, offset.y) && !Blocked(center + Vector3.up * .5f, companion.transform.position + Vector3.up))
+                    companion.Wound(TideRules.Damage(TideRules.Shot));
+            }
         }
         internal void Assist(Vulnerable target) { if (friend != null) friend.Attacked(target); }
-        internal bool Threatens(PlayerNet player)
-        { return !State.friendly && State.action != TideRules.Death && vulnerable.hp.Value > 0 && Target(TideSummons.Now) == player; }
+        // Host: whether this hostile idol is going for `who` (a player or a companion) right now.
+        internal bool Threatens(Component who)
+        { return !State.friendly && State.action != TideRules.Death && vulnerable.hp.Value > 0 && Target(TideSummons.Now) == who; }
+        // Host, companion: a monster attack landed on it. Two-argument Hit is the native creature-to-Vulnerable path
+        // (HitServerRpc without attacker), so no player is ever credited or blocked by BeforeWeaponHit.
+        internal void Wound(short damage)
+        { if (server && State.friendly && Standing && damage > 0) vulnerable.Hit((ushort)damage, 0); }
+        // Host, companion: whatever it just hurt turns on it. Hostile idols answer through ProvokeBy; native monsters get
+        // the idol as their defence-quest target (TideTaunt), limited to kinds whose native attack reaches it.
+        internal void Taunt(CreatureHostile enemy)
+        {
+            if (!server || !State.friendly || !Standing || enemy == null) return;
+            TideCreature idol = enemy.GetComponent<TideCreature>();
+            if (idol != null) { idol.ProvokeBy(this); return; }
+            if (TideTaunt.Pull(enemy, vulnerable)) taunted.Add(enemy);
+        }
+        internal bool ChasedBy(CreatureHostile enemy)
+        {
+            if (enemy == null) return false;
+            TideCreature idol = enemy.GetComponent<TideCreature>();
+            return idol != null ? idol.Threatens(this) : TideTaunt.Chasing(enemy, vulnerable);
+        }
+        internal void ReleaseTaunts()
+        {
+            foreach (CreatureHostile enemy in taunted) TideTaunt.Release(enemy, vulnerable);
+            taunted.Clear();
+        }
         private void StrikeFriends(byte action)
         {
             foreach (CreatureHostile enemy in friend.Enemies())

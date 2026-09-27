@@ -93,7 +93,8 @@ try {
  foreach($pattern in @('ServerRpcReceiveParams::SenderClientId','TideCreature::Provoke')){if($after -notmatch [regex]::Escape($pattern)){throw "Missing retaliation gate $pattern"};$count++}
  $target=Calls (Method $creature 'Target' 'Double')
  foreach($pattern in @('TideCreature::Nearest','TideRules::Provoked','TideCreature::Targetable')){if($target -notmatch [regex]::Escape($pattern)){throw "Missing hunt gate $pattern"};$count++}
- if($target.IndexOf('TideCreature::Nearest') -gt $target.IndexOf('TideRules::Provoked')){throw 'Players within the search must come before the hunted attacker'}; $count++
+ # Since 0.20.0 a friendly Tidefork that hits the idol is answered first (its own Provoked window); the player hunt is the last one.
+ if($target.IndexOf('TideCreature::Nearest') -gt $target.LastIndexOf('TideRules::Provoked')){throw 'Players within the search must come before the hunted attacker'}; $count++
  $strike=Calls (Method $creature 'Strike' 'Byte')
  foreach($pattern in @('TideRules::InHit','TideCreature::ClearSight','PlayerNet::HitClientRpc')){if($strike -notmatch [regex]::Escape($pattern)){throw "Missing hit gate $pattern"};$count++}
  $land=Calls (Method $creature 'Land' 'Double')

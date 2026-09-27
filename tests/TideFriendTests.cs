@@ -36,8 +36,23 @@ internal static class TideFriendTests
             friend.Hit(safe, 20);
             Check(safe.GetComponent<Vulnerable>().hits == 0, "splash cannot harm excluded target");
         }
+        Check(body.taunts.Count == 0, "excluded targets are never turned on the idol");
         friend.Hit(danger, 20);
         Check(danger.GetComponent<Vulnerable>().hp.Value == 80, "authorized monster takes native damage");
+        Check(body.taunts.Count == 1 && body.taunts[0] == danger, "a monster the idol hurts is turned on the idol");
+        // Once it fights the idol instead of the owner, the idol keeps fighting it (self-defence).
+        var turned = Enemy(host);
+        Check(!friend.Eligible(turned), "a monster after another player is left alone");
+        body.chasers.Add(turned);
+        Check(friend.Eligible(turned), "a monster attacking the idol itself is fought back");
+        body.chasers.Remove(turned);
+        Check(TideFriendRules.Tauntable("CreatureHostile") && TideFriendRules.Tauntable("OrcMelee") && TideFriendRules.Tauntable("CreatureBoar"),
+            "native melee monsters turn on the idol");
+        Check(!TideFriendRules.Tauntable("SpiderBoss") && !TideFriendRules.Tauntable("BossCultist") && !TideFriendRules.Tauntable("CreatureRangedHornet") &&
+            !TideFriendRules.Tauntable("SkeletonNecromancer") && !TideFriendRules.Tauntable(null), "bosses and ranged casters keep native targeting");
+        Check(TideFriendRules.TauntState(1) && TideFriendRules.TauntState(4) && TideFriendRules.TauntState(6) && TideFriendRules.TauntState(11) &&
+            !TideFriendRules.TauntState(3) && !TideFriendRules.TauntState(8) && !TideFriendRules.TauntState(10) && !TideFriendRules.TauntState(16),
+            "only the states native OnHit retargets from are taunted");
         friend.Attacked(calm.GetComponent<Vulnerable>());
         Check(friend.Eligible(calm), "owner's hit authorizes a monster not yet chasing owner");
         friend.Attacked(allied.GetComponent<Vulnerable>()); friend.Attacked(livestock.GetComponent<Vulnerable>());
@@ -46,7 +61,7 @@ internal static class TideFriendTests
         danger.chased = host;
         int hits = danger.GetComponent<Vulnerable>().hits;
         friend.Hit(danger, 9);
-        Check(danger.GetComponent<Vulnerable>().hits == hits, "impact rechecks changed combat ownership");
+        Check(danger.GetComponent<Vulnerable>().hits == hits && body.taunts.Count == 1, "impact rechecks changed combat ownership");
         TideSummons.Now = 114.9;
         Check(friend.Eligible(calm), "recent owner attack retained");
         TideSummons.Now = 115;

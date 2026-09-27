@@ -84,9 +84,12 @@ namespace TonyMods
                 patches.Patch(AccessTools.Method(typeof(PetGuard), "OnAnim"), prefix: new HarmonyMethod(typeof(TideSummons), "BeforePetHit"),
                     finalizer: new HarmonyMethod(typeof(TideSummons), "AfterPetHit"));
                 friendReady = true;
-                log.LogInfo("Friendly Tidefork ready: item 47941, reusable, one per player, owner-only assistance, protocol v5.");
+                log.LogInfo("Friendly Tidefork ready: item 47941, reusable, one per player, owner-only assistance, immune to player weapons, protocol v5.");
             }
             catch (Exception ex) { log.LogWarning("Tidefork attacker detection unavailable; friendly summons disabled: " + ex.Message); }
+            // Companions still work without it; native monsters just never turn on them (hostile idols still do).
+            try { TideTaunt.Resolve(); log.LogInfo("Friendly Tidefork: monsters it hurts turn on it (native melee monsters and hostile Tideforks)."); }
+            catch (Exception ex) { log.LogWarning("Native monsters will not attack friendly Tideforks: " + ex.Message); }
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             SceneManager.activeSceneChanged += SceneChanged;
             StartCoroutine(Localize());
@@ -400,6 +403,14 @@ namespace TonyMods
             return true;
         }
         internal void Changed() { dirty = true; }
+        // Host: companions that monster attacks can land on (TideCreature.Strike/Splash).
+        internal List<TideCreature> Companions()
+        {
+            var companions = new List<TideCreature>();
+            foreach (TideCreature creature in creatures.Values)
+                if (creature != null && creature.State != null && creature.State.friendly && creature.Standing) companions.Add(creature);
+            return companions;
+        }
         internal void Remove(TideCreature creature)
         {
             creature.Hide(); creatures.Remove(creature.State.id); Changed();

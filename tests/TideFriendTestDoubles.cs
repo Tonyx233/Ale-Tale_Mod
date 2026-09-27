@@ -85,6 +85,10 @@ namespace TonyMods
     internal class TideCreature : UnityEngine.Component
     {
         internal TideSummons.Record State = new TideSummons.Record();
-        internal bool Threatens(PlayerNet player) { return false; }
+        internal HashSet<CreatureHostile> chasers = new HashSet<CreatureHostile>();
+        internal List<CreatureHostile> taunts = new List<CreatureHostile>();
+        internal bool Threatens(UnityEngine.Component who) { return false; }
+        internal bool ChasedBy(CreatureHostile enemy) { return chasers.Contains(enemy); }
+        internal void Taunt(CreatureHostile enemy) { taunts.Add(enemy); }
     }
 }
