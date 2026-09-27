@@ -26,7 +26,7 @@ try {
     }
     foreach ($field in @(@('PlayerInventory','extContainer'),@('PlayerInventory','inventory'),@('ContainerNet','orderedItems'),@('ContainerNet','id'),
         @('ContainerNet','isShop'),@('ContainerNet','isPet'),@('ContainerNet','isGeneric'),@('InventoryUI','invExt'),@('ContainerUI','container'),
-        @('ItemData','quest'),@('Item','id'),@('Item','dataId'),@('Item','order'),@('Item','contId'))) {
+        @('ItemData','quest'),@('Item','id'),@('Item','dataId'),@('Item','rarity'),@('Item','order'),@('Item','contId'))) {
         if (!($types[$field[0]].Fields | Where-Object { $_.Name -eq $field[1] -and $_.IsPublic })) { throw ('Quick stack field missing: '+($field -join '.')) }
     }
     $state = $types['PlayerInventory'].NestedTypes | Where-Object Name -eq 'State'
@@ -43,6 +43,10 @@ try {
     foreach ($needle in @('ContainerNet::GetItemById','ContainerNet::AddNewItem(Item,System.UInt16&,System.Boolean)','ContainerNet::SetItemById','ContainerNet::RemoveItemById')) {
         if (!$rpc.Contains($needle)) { throw "Move RPC host logic changed: $needle" }
     }
+    # Host merges only equal rarity (quality); the fake host and the same-quality filter rely on it.
+    $add = @($types['ContainerNet'].Methods | Where-Object { $_.Name -eq 'AddNewItem' -and $_.Parameters.Count -eq 3 -and $_.Parameters[1].ParameterType.FullName -eq 'System.UInt16&' })
+    if ($add.Count -ne 1) { throw 'ContainerNet.AddNewItem(Item, out UInt16, Boolean) missing' }
+    if (!((($add[0].Body.Instructions | ForEach-Object { "$($_.Operand)" }) -join "`n").Contains('Item::rarity'))) { throw 'AddNewItem no longer compares rarity' }
     $enable = ($signatures['System.Void InventoryUI::OnEnable()'].Body.Instructions | ForEach-Object { $_.OpCode.Name + ' ' + $_.Operand }) -join "`n"
     if (!$enable.Contains("ldc.i4.s 9`nclt")) { throw 'Backpack container id threshold (9) changed' }
     $keybinds = $types['AppSettings'].NestedTypes | Where-Object Name -eq 'Keybinds'
@@ -60,5 +64,5 @@ try {
     foreach ($name in @('HorseStable','ItemStacks','MusketScope','YouTubeJukeboxPanel')) {
         if (!($mod.MainModule.Types | Where-Object Name -eq $name)) { throw "Combined pack lost $name" }
     }
-    Write-Output 'PASS: quick stack game APIs, vanilla guards, host move logic, free Q key and combined-pack wiring'
+    Write-Output 'PASS: quick stack game APIs, vanilla guards, host move logic, rarity merge key, free Q key and combined-pack wiring'
 } finally { $game.Dispose(); $mod.Dispose() }

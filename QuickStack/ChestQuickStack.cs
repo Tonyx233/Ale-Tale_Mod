@@ -12,8 +12,8 @@ using UnityEngine.UI;
 namespace TonyMods
 {
     // Chest quick stack: Q or the button beside "Take all" moves backpack items
-    // (hotbar 1-0 excluded) whose kind the open chest already holds. Client-only:
-    // it sends the vanilla double-click RPC, so the host needs no mod.
+    // (hotbar 1-0 excluded) whose kind and quality the open chest already holds.
+    // Client-only: it sends the vanilla double-click RPC, so the host needs no mod.
     public sealed class ChestQuickStack : MonoBehaviour
     {
         private const string ButtonName = "TonyQuickStack";
@@ -34,7 +34,7 @@ namespace TonyMods
         public void Initialize(ConfigFile config, ManualLogSource logger)
         {
             log = logger;
-            enabledSetting = config.Bind("QuickStack", "Enabled", true, "Chest quick stack: move backpack items (not hotbar 1-0) whose kind the open chest already holds.");
+            enabledSetting = config.Bind("QuickStack", "Enabled", true, "Chest quick stack: move backpack items (not hotbar 1-0) whose kind and quality (rarity) the open chest already holds.");
             key = config.Bind("QuickStack", "Key", KeyCode.Q, "Quick stack key while a chest is open.");
             log.LogInfo("Chest quick stack ready: " + key.Value + " or the button beside Take all; hotbar 1-0 kept.");
         }

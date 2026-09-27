@@ -17,19 +17,20 @@ namespace TonyMods
             return containerId >= FirstStorageId && !isShop && !isPet;
         }
 
-        // Backpack items outside the hotbar whose dataId already exists in the chest,
-        // in backpack order. Inputs are ContainerNet.orderedItems, where id 0 marks an
-        // empty slot. Rarity/durability may differ: the host merges what it can
-        // and places the rest in empty slots, leaving anything that does not fit.
+        // Backpack items outside the hotbar whose dataId and rarity (quality) the chest
+        // already holds together, in backpack order. Inputs are ContainerNet.orderedItems,
+        // where id 0 marks an empty slot. Durability/charge/repairs may differ: the host
+        // merges what it can and places the rest in empty slots, leaving anything that
+        // does not fit.
         internal static List<Item> Select(IEnumerable<Item> backpack, IEnumerable<Item> chest, bool chestIsGeneric, Func<ushort, ItemData> lookup)
         {
-            HashSet<ushort> kinds = new HashSet<ushort>();
-            foreach (Item item in chest) if (item.id != 0) kinds.Add(item.dataId);
+            HashSet<long> kinds = new HashSet<long>();
+            foreach (Item item in chest) if (item.id != 0) kinds.Add(Kind(item));
             List<Item> moves = new List<Item>();
             if (kinds.Count == 0) return moves;
             foreach (Item item in backpack)
             {
-                if (item.id == 0 || item.order < HotbarSlots || !kinds.Contains(item.dataId)) continue;
+                if (item.id == 0 || item.order < HotbarSlots || !kinds.Contains(Kind(item))) continue;
                 ItemData data = lookup(item.dataId);
                 if (data == null) continue;
                 // Mirrors InventoryUI.OnItemDoubleClickBP; MoveItemToContServerRpc does not check it.
@@ -37,6 +38,13 @@ namespace TonyMods
                 moves.Add(item);
             }
             return moves;
+        }
+
+        // dataId + rarity, the pair vanilla AddNewItem merges on. One long because
+        // csc 4 (C# 5) has no tuples.
+        private static long Kind(Item item)
+        {
+            return ((long)item.dataId << 32) | (uint)item.rarity;
         }
     }
 }
