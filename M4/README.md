@@ -66,6 +66,7 @@
 - **重入保護（0.14.1）**：房主端 ServerRpc 會同步執行，背包變動會經 `OnItemsChanged → CheckReload → Reload` 立刻呼叫回來。所以送出前先清空待送計數，換彈也先標記再送 RPC。0.14.0 因為順序相反，在打空彈匣時遞迴到 stack overflow 而閃退。
 - **模型**：火槍的第一人稱本身沒有手部模型。M4 借用火槍的收放槍與換槍動畫，隱藏原版 mesh，把 M4 掛在 `MusketRoot/Musket`。第三人稱（`PlayerAnimTP`）與地上掉落物（`CollectibleNet`）也換成 M4，並套用火槍的持槍姿勢（`TorsoState = 3`）。
 - **音效**：遊戲關閉了 Unity 內建音訊，所有聲音都走 FMOD。啟動時以程式合成槍聲（3 種變化）、空倉、退彈匣、上彈匣、拉槍機與切換模式音，透過 FMOD Core 播放並乘上 `bus:/Sound` 音量；其他玩家的槍聲經房主轉送，有 3D 距離衰減與槍口火光。FMOD 失敗時改用原生弩聲並寫入 log。
+- **轉送封包**：Netcode 交給 named message handler 的 reader，就是 `NamedMessage` 剛讀完 8 byte 頻道 hash 的那一個（`Position = 8`，`Length` 含 hash）。0.14.0～0.17.3 的 `Receive` 用 `Length` 當 payload 長度，每則都讀超過而被丟掉（log：`M4 message rejected: Reading past the end of the buffer`），所以玩家之間一直聽不到彼此的槍聲與換彈聲、看不到對方的鏡，客機按 U 也拆不下鏡。現在讀 `Length - Position`。
 - **瞄準鏡**：共用火槍瞄準鏡的 FOV、靈敏度與射擊時還原 FOV 的邏輯。放大鏡各有準星：黃銅鏡是十字，狙擊鏡是 mil-dot。火槍維持黃銅鏡與 3× → 6× → 收起。
 - **可換鏡的狀態**：裝了哪種鏡存在槍的 `Item.metaInt` 低位元組。原生只有樂透彩券會寫這個欄位，它會跟著存檔（`SavedCont.items`、`SavedColl.item`）與 `Item.NetworkSerialize` 同步；9999 堆疊也會把值不同的槍分開放。值 0 是出廠機械瞄具。0.16.1 移除了全像（3）與 ACOG（4）：存檔裡裝著這兩種鏡的槍、以及 0.14.x 的舊槍（值 0，原本是 ACOG）都改成機械瞄具；其餘鏡的值與物品 ID 不變。
 - **安裝**：鏡的 `useItemOnItemType` 設成 40。原生在背包拖曳時，只要這個值不是 0，房主端就會呼叫 `ItemManager.UseItemOnItem`，而它原生只處理 1（修理）和 2（重鑄）。M4 以 prefix 接手：目標是 M4 才安裝並回傳成功，否則交回原生，照常交換位置。
@@ -99,7 +100,7 @@
 `run-m4.ps1` 包含：
 - 116 項規則檢查：射速、換彈數量、RPC 合併與重入、散布、擊殺時間、瞄準段數、鏡的 `metaInt` 編碼（含已移除的 3／4 讀成機械瞄具）、物品 ID 對應（47933／47934 不再是鏡）、安裝／拆卸／拆疊決策、各鏡參數、紅點大小、合成音效。
 - 17,903 項模型檢查：索引、非退化三角形、所有部件封閉且外向繞序、尺寸、圖示格式；照門鬼環中心與前準星尖端都在 `M4Scopes.cs` 的 `SightY = 0.091`，紅點在鏡筒軸線上且沒有不透明鏡片。
-- 131 項 Cecil 靜態檢查：遊戲 API、兩個原生限制仍存在、商店一整疊定價、拖曳會走到 `UseItemOnItem` 且原生只處理 1/2、`metaInt` 只有 Item 建構子與樂透會寫且有存檔與同步、`fpHands` 沒有新的原生使用者、FMOD／Netcode API、Harmony handler 參數、嵌入資源為最新版。
+- 136 項 Cecil 靜態檢查：遊戲 API、兩個原生限制仍存在、商店一整疊定價、拖曳會走到 `UseItemOnItem` 且原生只處理 1/2、`metaInt` 只有 Item 建構子與樂透會寫且有存檔與同步、`fpHands` 沒有新的原生使用者、FMOD／Netcode API、named message 的 reader 已讀過頻道 hash 且 `Receive` 讀 `Length - Position`、Harmony handler 參數、嵌入資源為最新版。
 
 **尚未做遊戲內驗證**（build 與靜態測試無法取代）。建議實測：
 
