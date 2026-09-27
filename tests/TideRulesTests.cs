@@ -33,6 +33,13 @@ internal static class TideRulesTests
         Check(TideRules.StopDistance < TideRules.EngageDistance, "stops inside engage distance");
         Check(TideRules.EngageDistance <= TideRules.BiteReach && TideRules.EngageDistance <= TideRules.WaveRadius, "engaged targets are reachable");
         Check(TideRules.InHit(TideRules.Bite,0,TideRules.EngageDistance,0) && TideRules.InHit(TideRules.Wave,0,TideRules.EngageDistance,0), "chosen attack reaches the target ahead");
+        // Melee starts only where its shapes land; targets on another floor are chased or shelled instead.
+        Check(TideRules.CanEngage(TideRules.EngageDistance,0) && !TideRules.CanEngage(TideRules.EngageDistance+.01f,0), "engage distance");
+        Check(TideRules.CanEngage(1,TideRules.HitHeight) && TideRules.CanEngage(1,-TideRules.HitHeight), "same floor engaged");
+        Check(!TideRules.CanEngage(1,TideRules.HitHeight+.01f) && !TideRules.CanEngage(1,-TideRules.HitHeight-.01f) && !TideRules.CanEngage(0,6), "other floors never bitten");
+        Check(!TideRules.CanEngage(Single.NaN,0) && !TideRules.CanEngage(1,Single.NaN) && !TideRules.CanEngage(Single.PositiveInfinity,0), "bad engage input rejected");
+        for(float d=0;d<=TideRules.EngageDistance;d+=.05f) for(float h=-2;h<=2;h+=.05f)
+            if(TideRules.CanEngage(d,h)) Check(TideRules.InHit(TideRules.Bite,0,d,h) && TideRules.InHit(TideRules.Wave,0,d,h), "engaged target is hit "+d+","+h);
         Check(TideRules.InHit(TideRules.Bite,0,4,0) && TideRules.InHit(TideRules.Bite,1.6f,8,0), "bite ahead");
         Check(!TideRules.InHit(TideRules.Bite,1.7f,2,0), "side dodge");
         Check(!TideRules.InHit(TideRules.Bite,0,-1,0), "bite cannot hit behind");
@@ -126,6 +133,12 @@ internal static class TideRulesTests
         Check(TideRules.ValidApex(0) && TideRules.ValidApex(TideRules.ShotApexes[0]) && TideRules.ValidApex(TideRules.ShotApexes[2]), "skipped and real arcs accepted");
         Check(!TideRules.ValidApex(-1) && !TideRules.ValidApex(9) && !TideRules.ValidApex(Single.NaN) && !TideRules.ValidApex(Single.PositiveInfinity), "bad arcs rejected");
         Check(TideRules.Shot>TideRules.Death && TideRules.SceneNameMax>=10, "new action is last; the game's scene names fit");
+        // Tony's 0.18.0 retaliation: the attacker is hunted for 15 s after each hit, at any distance and height, while
+        // nobody is within the search radius. The 8 m reach for targets off the NavMesh is my pick.
+        Check(Near(TideRules.AggroSeconds,15), "hunt lasts 15 s after the last hit");
+        Check(!TideRules.Provoked(0,5) && TideRules.Provoked(10,10) && TideRules.Provoked(10,25) && !TideRules.Provoked(10,25.01), "hunt window");
+        Check(!TideRules.Provoked(Double.NaN,10) && !TideRules.Provoked(10,Double.NaN) && !TideRules.Provoked(Double.PositiveInfinity,10) && !TideRules.Provoked(-1,5), "bad hunt clock rejected");
+        Check(Near(TideRules.ReachRadius,8) && TideRules.ReachRadius<TideRules.ShotMax, "approach spots end inside volley range");
         Console.WriteLine("PASS: "+count+" Tidefork purchase/authority/geometry/timing rules");
     }
 }

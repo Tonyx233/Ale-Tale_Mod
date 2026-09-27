@@ -12,6 +12,13 @@ namespace TonyMods
         // Movement (NavMeshAgent), host only.
         internal const float Speed = 4.725f, Acceleration = 15.75f, TurnSpeed = 360, StopDistance = 3.7125f;
         internal const float SearchRadius = 30, SearchHeight = 4, RepathInterval = .15f;
+        // Retaliation: the player whose weapon last hurt the idol is hunted at any distance and height while nobody is
+        // within the search above, until AggroSeconds pass without another hit. Anyone nearer is fought first, even
+        // mid-hunt.
+        internal const float AggroSeconds = 15;
+        // A target standing off the NavMesh (roof, rock) beyond ShotMax is approached through the nearest walkable spot
+        // within ReachRadius of it, which is inside ShotMax, so the volley can reach it from there.
+        internal const float ReachRadius = 8;
         // Attack when the target is within EngageDistance: wave when its cooldown is ready, else bite.
         internal const float EngageDistance = 4.8375f;
         internal const float FirstWaveDelay = 6, WaveCooldown = 10;
@@ -22,8 +29,9 @@ namespace TonyMods
         internal const byte Summon = 0, Walk = 1, Bite = 2, Wave = 4, Death = 5, Shot = 6;
         // 潮彈 volley: after one windup the idol throws ShotCount lobbed water shells ShotInterval apart, each aimed
         // when the previous one leaves the crown. It starts on targets 4.84-29.9 m away (0-29.9 m when the target
-        // cannot be reached), so the band begins where melee stops; later shells finish the volley at any range up
-        // to ShotMax. The idol stands still for the volley only, and the cooldown starts when the last shell is thrown.
+        // cannot be reached or stands on another floor), so the band begins where melee stops; later shells finish the
+        // volley at any range up to ShotMax. The idol stands still for the volley only, and the cooldown starts when the
+        // last shell is thrown.
         internal const int ShotCount = 5;
         internal const float ShotMin = 4.84f, ShotMax = 29.9f, FirstShotDelay = 3, ShotCooldown = 3, ShotInterval = .35f, ShotReplan = .4f;
         // Damage radius, and the slightly wider ring drawn on the ground as the landing telegraph (0.17.0's 2.2 / 2.5 m +30%).
@@ -69,6 +77,13 @@ namespace TonyMods
         }
         internal static bool CrossedHit(byte action, double previous, double now)
         { return Melee(action) && previous < Windup(action) && now >= Windup(action); }
+        // Melee only starts where its shapes can land: in reach and on the idol's own floor. Targets above or below are
+        // chased or shelled instead of bitten at thin air.
+        internal static bool CanEngage(float distance, float height)
+        { return Finite(distance) && Finite(height) && distance <= EngageDistance && Math.Abs(height) <= HitHeight; }
+        // hitAt = when the hunted player last hurt the idol (0 = no hunt).
+        internal static bool Provoked(double hitAt, double now)
+        { return hitAt > 0 && Finite(hitAt) && Finite(now) && now - hitAt <= AggroSeconds; }
         // Horizontal distance to the landing point decides the flight, 1.5x faster than 0.17.0's .9 + d/30:
         // 4.84 m ≈ 0.71 s, 29.9 m ≈ 1.26 s.
         internal static float ShotFlight(float distance) { return (.9f + distance / 30) / 1.5f; }

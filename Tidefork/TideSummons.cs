@@ -67,16 +67,39 @@ namespace TonyMods
             Patch(typeof(Vulnerable), "OnDeath", "NativeCreature");
             Patch(typeof(SaveManager), "LoadGame", "BeforeWorld");
             Patch(typeof(SaveManager), "NewGame", "BeforeWorld");
+            // Without it the idols still work; they just ignore attackers beyond the search radius.
+            try { PatchWeaponHits(); }
+            catch (Exception ex) { log.LogWarning("Tidefork idols will not hunt distant attackers: " + ex.Message); }
             LocalizationSettings.SelectedLocaleChanged += LocaleChanged;
             SceneManager.activeSceneChanged += SceneChanged;
             StartCoroutine(Localize());
-            log.LogInfo("Tidefork enabled: item 47940, price 1, host-authoritative summons, no room cap or lifetime, " + TideRules.Health + " HP, water shell volleys of " + TideRules.ShotCount + " at " + TideRules.ShotMin + "-" + TideRules.ShotMax + " m.");
+            log.LogInfo("Tidefork enabled: item 47940, price 1, host-authoritative summons, no room cap or lifetime, " + TideRules.Health + " HP, water shell volleys of " + TideRules.ShotCount + " at " + TideRules.ShotMin + "-" + TideRules.ShotMax + " m, attackers hunted for " + TideRules.AggroSeconds + " s at any range.");
         }
         private void Patch(Type type, string method, string prefix)
         {
             var target = AccessTools.Method(type, method);
             if (target == null) throw new MissingMethodException(type.Name, method);
             patches.Patch(target, prefix: new HarmonyMethod(typeof(TideSummons), prefix));
+        }
+        // Vulnerable.HitServerRpc carries no attacker, but its NGO receiver knows the sender: every player weapon (GunTool
+        // incl. the M4, WeaponTool, DualSickles, PlayerProjectile) sends the 5-argument overload from the shooter's own
+        // peer, and the host's own shots run the same receiver as client 0. The name is NGO's hash of that signature.
+        private void PatchWeaponHits()
+        {
+            var handler = AccessTools.Method(typeof(Vulnerable), "__rpc_handler_3894916604");
+            if (handler == null) throw new MissingMethodException("Vulnerable", "__rpc_handler_3894916604");
+            patches.Patch(handler, prefix: new HarmonyMethod(typeof(TideSummons), "BeforeWeaponHit"), postfix: new HarmonyMethod(typeof(TideSummons), "AfterWeaponHit"));
+        }
+        private static void BeforeWeaponHit(NetworkBehaviour target, out ushort __state)
+        { var vulnerable = target as Vulnerable; __state = vulnerable == null ? (ushort)0 : vulnerable.hp.Value; }
+        // Only a hit that took HP off an idol counts, so summon invulnerability and rejected weapons start no hunt.
+        private static void AfterWeaponHit(NetworkBehaviour target, __RpcParams rpcParams, ushort __state)
+        {
+            var vulnerable = target as Vulnerable;
+            if (instance == null || vulnerable == null || vulnerable.hp.Value >= __state) return;
+            TideCreature creature = vulnerable.GetComponent<TideCreature>();
+            ulong sender = rpcParams.Server.Receive.SenderClientId;
+            if (creature != null && creature.Provoke(sender)) instance.log.LogInfo("Tidefork provoked: network=" + creature.State.id + "; player=" + sender);
         }
         private static bool NativeCreature(Component __instance) { return !Owned(__instance); }
         private static void BeforeWorld() { if (instance != null) instance.Clear(true); }

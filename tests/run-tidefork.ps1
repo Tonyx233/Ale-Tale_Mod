@@ -44,6 +44,23 @@ try {
  if($spawn -notmatch 'NetworkObject::Spawn' -or $spawn -notmatch '_manualSpawn'){throw 'Native spawn lifecycle changed'}; $count++
  $gun=Calls (Method (TypeDef $game 'GunTool') 'RaycastShot' '')
  if($gun -notmatch 'TryGetComponent<Interactive>' -or $gun -notmatch 'GetComponentInParent<Vulnerable>'){throw 'Native weapon collider contract changed'}; $count++
+ # Retaliation: HitServerRpc carries no attacker, so the idol reads the sender in NGO's receiver of the 5-argument
+ # overload. Every caller of the 8-argument Vulnerable.Hit that feeds it must run on the shooter's own peer.
+ $vulnerableType=TypeDef $game 'Vulnerable'
+ $weaponRpc=[regex]::Escape('Vulnerable::HitServerRpc(System.UInt16,System.UInt16,UnityEngine.Vector3,UnityEngine.Vector3,UnityEngine.Vector3)')
+ if((Calls (Method $vulnerableType '__rpc_handler_3894916604' 'NetworkBehaviour,FastBufferReader,__RpcParams')) -notmatch $weaponRpc){throw 'Weapon hit receiver changed; idols would lose their attacker'}; $count++
+ $weaponHit=Method $vulnerableType 'Hit' 'UInt16,UInt16,Vector3,Vector3,Vector3,Boolean&,Boolean,Boolean'
+ if((Calls $weaponHit) -notmatch $weaponRpc){throw 'Weapon hits no longer use the 5-argument RPC'}; $count++
+ $senders=New-Object 'System.Collections.Generic.SortedSet[string]'
+ foreach($t in $game.MainModule.GetTypes()){foreach($m in $t.Methods){if(!$m.HasBody){continue}
+  foreach($i in $m.Body.Instructions){if($i.Operand -is [Mono.Cecil.MethodReference] -and $i.Operand.FullName -eq $weaponHit.FullName){[void]$senders.Add($t.Name+'.'+$m.Name)}}}}
+ if(($senders -join ',') -ne 'DualSickles.CapsuleHit,GunTool.RaycastShot,PetGuard.OnAnim,PlayerProjectile.CheckCollision,WeaponTool.Hit'){throw "Weapon hit senders changed: $($senders -join ', ')"}; $count++
+ $flight=Calls (Method (TypeDef $game 'PlayerProjectile') 'FixedUpdate' '')
+ if($flight -notmatch 'NetworkManager::get_LocalClientId' -or $flight -notmatch 'PlayerProjectile::clientOwnerId'){throw 'Player projectiles no longer hit on the shooter''s peer'}; $count++
+ # PetGuard is the one server-side sender and would blame the host. It only engages creatures in its owner's danger
+ # list, which only native CreatureHostile.SetChasedPlayer fills; idols stop the native AI on the frame they spawn.
+ $petScan=(@((TypeDef $game 'PetGuard').NestedTypes | Where-Object Name -like '<CheckEnemiesNearby>*') | ForEach-Object { Calls (Method $_ 'MoveNext' '') }) -join "`n"
+ if($petScan -notmatch 'PlayerNet::_dangerList'){throw 'Guard pets may now attack idols and blame the host'}; $count++
  if(!($mod.MainModule.Resources|Where-Object Name -eq 'Tony.Tidefork.model.json')){throw 'Missing Tidefork model'}; $count++
  foreach($asset in @('model.json','bronze.png','red-stone.png')) {
   $embedded=$mod.MainModule.Resources|Where-Object Name -eq ('Tony.Tidefork.'+$asset)
@@ -68,7 +85,15 @@ try {
  # ServerClientId is compiled as the constant zero; require the sender==0 guard before deserialization.
  if($receive -notmatch '(?s)ldarg\.1\s+IL_\w+: ldc\.i4\.0\s+IL_\w+: conv\.i8\s+IL_\w+: beq.*leave'){throw 'Missing host-only sender comparison'};$count++
  $tick=Calls (Method $creature 'Tick' '')
- foreach($pattern in @('get_IsServer','TideRules::CrossedHit','TideCreature::Strike','TideCreature::Land','TideRules::InShotRange','TideCreature::Fire','TideRules::PlanAt','TideCreature::Plan','NavMeshPathStatus')){if($tick -notmatch [regex]::Escape($pattern)){throw "Missing combat gate $pattern"};$count++}
+ foreach($pattern in @('get_IsServer','TideRules::CrossedHit','TideCreature::Strike','TideCreature::Land','TideRules::InShotRange','TideCreature::Fire','TideRules::PlanAt','TideCreature::Plan','NavMeshPathStatus','TideCreature::Target','TideRules::CanEngage','TideCreature::Approach')){if($tick -notmatch [regex]::Escape($pattern)){throw "Missing combat gate $pattern"};$count++}
+ if($tick -match 'TideCreature::Nearest'){throw 'Tick must pick targets through Target so hunted attackers are seen'}; $count++
+ $hunt=Calls (Method $manager 'PatchWeaponHits' '')
+ if($hunt -notmatch '__rpc_handler_3894916604' -or $hunt -notmatch 'AfterWeaponHit'){throw 'Retaliation must patch the weapon hit receiver'}; $count++
+ $after=Calls (Method $manager 'AfterWeaponHit' 'NetworkBehaviour,__RpcParams,UInt16')
+ foreach($pattern in @('ServerRpcReceiveParams::SenderClientId','TideCreature::Provoke')){if($after -notmatch [regex]::Escape($pattern)){throw "Missing retaliation gate $pattern"};$count++}
+ $target=Calls (Method $creature 'Target' 'Double')
+ foreach($pattern in @('TideCreature::Nearest','TideRules::Provoked','TideCreature::Targetable')){if($target -notmatch [regex]::Escape($pattern)){throw "Missing hunt gate $pattern"};$count++}
+ if($target.IndexOf('TideCreature::Nearest') -gt $target.IndexOf('TideRules::Provoked')){throw 'Players within the search must come before the hunted attacker'}; $count++
  $strike=Calls (Method $creature 'Strike' 'Byte')
  foreach($pattern in @('TideRules::InHit','TideCreature::ClearSight','PlayerNet::HitClientRpc')){if($strike -notmatch [regex]::Escape($pattern)){throw "Missing hit gate $pattern"};$count++}
  $land=Calls (Method $creature 'Land' 'Double')
@@ -77,7 +102,7 @@ try {
  foreach($pattern in @('TideRules::InSplash','TideCreature::Blocked','PlayerNet::HitClientRpc','PlayerNet::HitEffectClientRpc')){if($splash -notmatch [regex]::Escape($pattern)){throw "Missing shell hit gate $pattern"};$count++}
  $aim=Calls (Method $creature 'Aim' 'PlayerNet,Vector3,Single,Boolean,Vector3&,Single&')
  foreach($pattern in @('TideRules::InShotRange','TideCreature::Ground','TideCreature::ClearArc','TideRules::LeadSeconds')){if($aim -notmatch [regex]::Escape($pattern)){throw "Missing shell aim gate $pattern"};$count++}
- $fire=Calls (Method $creature 'Fire' 'PlayerNet,Vector3,Double')
+ $fire=Calls (Method $creature 'Fire' 'PlayerNet,Vector3,Boolean,Double')
  foreach($pattern in @('TideCreature::Unlanded','TideCreature::Aim','TideRules::Release','TideSummons/Record::shotAt','TideCreature::Enter')){if($fire -notmatch [regex]::Escape($pattern)){throw "Missing volley start gate $pattern"};$count++}
  if($fire.IndexOf('Record::shotAt') -gt $fire.IndexOf('TideCreature::Enter')){throw 'Volley fields must be set before the action snapshot is marked'}; $count++
  $plan=Calls (Method $creature 'Plan' 'PlayerNet,Double')

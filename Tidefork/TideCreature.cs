@@ -30,6 +30,9 @@ namespace TonyMods
         private PlayerNet tracked;
         private Vector3 trackedPosition, trackedVelocity;
         private double trackedAt;
+        // Host: the player whose weapon last took HP off the idol, and when (0 = no hunt).
+        private ulong provoker;
+        private double provokedAt;
 
         internal void Initialize(TideSummons manager, TideSummons.Record record, bool isServer)
         {
@@ -120,9 +123,10 @@ namespace TonyMods
             lastHostClock = now;
             if (paused > 0)
             {
-                // Preserve the telegraph, shells in the air and the cooldowns across a paused solo game.
+                // Preserve the telegraph, shells in the air, the cooldowns and a running hunt across a paused solo game.
                 State.started += paused; State.born += paused; nextWave += paused; nextPath += paused;
                 nextShot += paused; nextShotPlan += paused; if (State.shotAt > 0) State.shotAt += paused;
+                if (provokedAt > 0) provokedAt += paused;
                 return;
             }
             double elapsed = now - State.started;
@@ -152,7 +156,7 @@ namespace TonyMods
             {
                 // Stands still for the whole volley; the chase resumes after the last throw while shells still fly.
                 Stop();
-                PlayerNet aim = Nearest();
+                PlayerNet aim = Target(now);
                 if (aim != null) Track(aim, now);
                 // A long frame stall can make several shells due at once; aim them all so the volley stays at five.
                 while (planned < TideRules.ShotCount && elapsed >= TideRules.PlanAt(planned)) Plan(aim, now);
@@ -160,23 +164,26 @@ namespace TonyMods
                 return;
             }
             if (!agent.enabled || !agent.isOnNavMesh) { Enter(TideRules.Death); return; }
-            PlayerNet target = Nearest();
+            PlayerNet target = Target(now);
             if (target == null) { Stop(); stranded = false; return; }
             Track(target, now);
-            Vector3 delta = target.transform.position - transform.position; delta.y = 0;
+            Vector3 delta = target.transform.position - transform.position;
+            float height = delta.y; delta.y = 0;
             float distance = delta.magnitude;
-            if (distance <= TideRules.EngageDistance && ClearSight(target))
+            if (TideRules.CanEngage(distance, height) && ClearSight(target))
             {
                 Stop(); if (distance > .01f) transform.rotation = Quaternion.LookRotation(delta);
                 byte action = now >= nextWave ? TideRules.Wave : TideRules.Bite;
                 if (action == TideRules.Wave) nextWave = now + TideRules.WaveCooldown;
                 Enter(action); return;
             }
-            if (now >= nextShot && now >= nextShotPlan && TideRules.InShotRange(distance, stranded))
+            // Melee cannot reach a target the idol cannot walk to or one on another floor, so shells may start at any range.
+            bool anyRange = stranded || Math.Abs(height) > TideRules.HitHeight;
+            if (now >= nextShot && now >= nextShotPlan && TideRules.InShotRange(distance, anyRange))
             {
                 // Arc checks cost dozens of raycasts: retry a blocked arc a few times a second, not every frame.
                 nextShotPlan = now + TideRules.ShotReplan;
-                if (Fire(target, delta, now)) return;
+                if (Fire(target, delta, anyRange, now)) return;
             }
             if (now >= nextPath)
             {
@@ -185,9 +192,42 @@ namespace TonyMods
                 bool partial = agent.hasPath && !agent.pathPending && agent.pathStatus == NavMeshPathStatus.PathPartial;
                 NavMeshHit nav;
                 stranded = !NavMesh.SamplePosition(target.transform.position, out nav, 1, agent.areaMask);
-                if (!stranded) { agent.isStopped = false; agent.SetDestination(nav.position); stranded = partial; }
+                if (!stranded) { Chase(nav.position); stranded = partial; }
+                // Too far to shell a target the idol cannot stand next to: close in through the nearest walkable spot.
+                else if (distance > TideRules.ShotMax && Approach(target.transform.position, out nav)) Chase(nav.position);
                 else Stop();
             }
+        }
+        // A hunt can path across the map: let a search that is still running finish instead of restarting it.
+        private void Chase(Vector3 destination) { agent.isStopped = false; if (!agent.pathPending) agent.SetDestination(destination); }
+        // Nearest walkable spot to a target off the NavMesh (roof, rock, tower): around its feet, else straight below it
+        // at the idol's own level. Either lies within ReachRadius of the target horizontally.
+        private bool Approach(Vector3 feet, out NavMeshHit nav)
+        {
+            return NavMesh.SamplePosition(feet, out nav, TideRules.ReachRadius, agent.areaMask) ||
+                NavMesh.SamplePosition(new Vector3(feet.x, transform.position.y, feet.z), out nav, TideRules.ReachRadius, agent.areaMask);
+        }
+        // Host: a player's weapon just took HP off this idol. Returns true when that starts a new hunt.
+        internal bool Provoke(ulong client)
+        {
+            if (!server || State == null || State.action == TideRules.Death) return false;
+            double now = TideSummons.Now;
+            bool fresh = client != provoker || !TideRules.Provoked(provokedAt, now);
+            provoker = client; provokedAt = now;
+            return fresh;
+        }
+        // Whoever is within the search radius comes first, even halfway through a hunt. With nobody near, the last
+        // player who hurt the idol is hunted at any distance and height until AggroSeconds pass without a new hit.
+        private PlayerNet Target(double now)
+        {
+            PlayerNet near = Nearest();
+            if (near != null || provokedAt <= 0) return near;
+            PlayerNet attacker;
+            if (TideRules.Provoked(provokedAt, now) && PlayerManager.Instance != null &&
+                PlayerManager.Instance.players.TryGetValue(provoker, out attacker) && Targetable(attacker)) return attacker;
+            // Expired, dead, invisible or gone: only a new hit starts another hunt.
+            provokedAt = 0;
+            return null;
         }
         private void Enter(byte action)
         {
@@ -199,14 +239,14 @@ namespace TonyMods
         }
         // 潮彈 volley: aims the first shell and starts the windup. Every shell is fixed when it is aimed and written
         // to the snapshot, so all clients draw the same rings and flights.
-        private bool Fire(PlayerNet target, Vector3 delta, double now)
+        private bool Fire(PlayerNet target, Vector3 delta, bool anyRange, double now)
         {
             if (Unlanded()) return false;
             Vector3 from = transform.position + Vector3.up * TideRules.MuzzleHeight;
             // The shells form above the crown: a ceiling right over the head rules the volley out.
             if (Blocked(transform.position + Vector3.up * 1.6f, from)) return false;
             Vector3 to; float apex;
-            if (!Aim(target, from, TideRules.Release(0), stranded, out to, out apex)) return false;
+            if (!Aim(target, from, TideRules.Release(0), anyRange, out to, out apex)) return false;
             // Plant the feet now: braking at full chase speed would slide the crown ~0.7 m off the gathering shell.
             if (agent.enabled && agent.isOnNavMesh) agent.velocity = Vector3.zero;
             if (delta.sqrMagnitude > .0001f) transform.rotation = Quaternion.LookRotation(delta);
@@ -218,8 +258,9 @@ namespace TonyMods
             Enter(TideRules.Shot);
             return true;
         }
-        // Aims the next shell of the volley at whoever is nearest now. Later shells finish the volley at any range
-        // up to ShotMax; with no target or no clear arc the shell is skipped (apex 0) and the volley goes on.
+        // Aims the next shell of the volley at the current target (nearest, else the hunted attacker). Later shells
+        // finish the volley at any range up to ShotMax; with no target or no clear arc the shell is skipped (apex 0)
+        // and the volley goes on.
         private void Plan(PlayerNet target, double now)
         {
             int shell = planned++;
@@ -337,13 +378,14 @@ namespace TonyMods
             PlayerNet best = null; float nearest = TideRules.SearchRadius * TideRules.SearchRadius;
             foreach (PlayerNet player in PlayerManager.Instance.players.Values)
             {
-                if (player == null || !player.IsSpawned || player.hp.Value <= 0 || player.isDespawning || player.isInvisible.Value) continue;
-                if (Math.Abs(player.transform.position.y - transform.position.y) > TideRules.SearchHeight) continue;
+                if (!Targetable(player) || Math.Abs(player.transform.position.y - transform.position.y) > TideRules.SearchHeight) continue;
                 float distance = (player.transform.position - transform.position).sqrMagnitude;
                 if (distance < nearest) { nearest = distance; best = player; }
             }
             return best;
         }
+        private static bool Targetable(PlayerNet player)
+        { return player != null && player.IsSpawned && player.hp.Value > 0 && !player.isDespawning && !player.isInvisible.Value; }
         private bool ClearSight(PlayerNet player)
         {
             Vector3 from = transform.position + Vector3.up * 1.1f, to = player.transform.position + Vector3.up;
@@ -361,7 +403,7 @@ namespace TonyMods
             if (!server || PlayerManager.Instance == null || vulnerable.hp.Value == 0) return;
             foreach (PlayerNet player in PlayerManager.Instance.players.Values)
             {
-                if (player == null || !player.IsSpawned || player.hp.Value <= 0 || player.isDespawning || player.isInvisible.Value) continue;
+                if (!Targetable(player)) continue;
                 Vector3 local = transform.InverseTransformPoint(player.transform.position);
                 if (!TideRules.InHit(action, local.x, local.z, local.y) || !ClearSight(player)) continue;
                 // Same authoritative-to-owner damage path as CreatureHostile. One call per target per attack.
@@ -373,7 +415,7 @@ namespace TonyMods
             if (!server || PlayerManager.Instance == null || vulnerable.hp.Value == 0) return;
             foreach (PlayerNet player in PlayerManager.Instance.players.Values)
             {
-                if (player == null || !player.IsSpawned || player.hp.Value <= 0 || player.isDespawning || player.isInvisible.Value) continue;
+                if (!Targetable(player)) continue;
                 Vector3 offset = player.transform.position - center;
                 if (!TideRules.InSplash(offset.x, offset.z, offset.y) || Blocked(center + Vector3.up * .5f, player.transform.position + Vector3.up)) continue;
                 // Falls from above, so it cannot be blocked. The native effect RPC slows on the owner after the same
