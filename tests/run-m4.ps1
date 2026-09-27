@@ -106,6 +106,7 @@ try {
     [void](Method $runtime 'get_CoreSystem' ''); [void](Method $runtime 'GetBus' 'String'); [void](Method $runtime 'get_IsInitialized' '')
     [void](Method (Def $netcode 'FastBufferWriter') 'WriteBytesSafe' 'Byte[],Int32,Int32')
     [void](Method (Def $netcode 'FastBufferReader') 'ReadBytesSafe' 'Byte[]&,Int32,Int32')
+    [void](Method (Def $netcode 'FastBufferReader') 'get_Position' '')
 
     foreach ($name in @('M4Armory','M4Rifle','M4Model','M4Audio','M4Sound','M4Rules','MusketScope','HorseStable','ItemStacks','ChestQuickStack','YouTubeJukeboxPanel')) { [void](Def $mod "TonyMods.$name"); $count++ }
     $armory = Def $mod 'TonyMods.M4Armory'
@@ -145,6 +146,19 @@ try {
     if ($mark -lt 0 -or $state -lt 0 -or $mark -gt $nested -or $state -gt $nested -or $nested -gt $remove -or $remove -gt $addCharge) { throw 'StartReload must mark the reload before Flush and the inventory RPCs' }
     if (!((Body (Method $armory 'BeforeCheckReload' 'GunTool')) -match 'M4Rifle::get_Busy')) { throw 'CheckReload prefix must ignore a reload in progress' }
     $count += 3
+    # Named-message handlers get the reader NamedMessage.Deserialize already used for the 8-byte channel hash
+    # (Position 8, Length includes it). Until 0.17.3 Receive read Length bytes, overflowed and dropped every
+    # M4 message: teammates never heard each other's shots and optic/detach messages never arrived.
+    $named = @(Body (Method (Def $netcode 'Unity.Netcode.NamedMessage') 'Deserialize' $null))
+    $hash = Index $named 'FastBufferReader::ReadValueSafe<System.UInt64>'
+    $keep = Index $named 'NamedMessage::m_ReceiveData'
+    if ($hash -lt 0 -or $keep -lt 0 -or $hash -gt $keep) { throw 'NamedMessage no longer passes the reader past the channel hash; re-check M4 receive' }
+    $receive = @(Body (Method $armory 'Receive' 'UInt64,FastBufferReader'))
+    $length = Index $receive 'FastBufferReader::get_Length'
+    $position = Index $receive 'FastBufferReader::get_Position'
+    $read = Index $receive 'FastBufferReader::ReadBytesSafe'
+    if ($length -lt 0 -or $position -lt $length -or $read -lt $position -or $receive[$position + 1] -notmatch ': sub$') { throw 'M4 receive must read Length - Position bytes' }
+    $count += 2
     $scopeGun = Body (Method (Def $mod 'TonyMods.MusketScope') 'GunUpdated' 'GunTool')
     $isM4 = [Array]::FindIndex([object[]]$scopeGun, [Predicate[object]]{ param($l) $l -match 'M4Armory::IsM4' })
     $mesh = [Array]::FindIndex([object[]]$scopeGun, [Predicate[object]]{ param($l) $l -match 'ldstr "MusketRoot/Musket/Musket1_2_1"' })

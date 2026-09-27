@@ -309,11 +309,13 @@ namespace TonyMods
                 if (id != shooter && id != network.LocalClientId) Send(id, payload, delivery);
         }
 
+        // Netcode hands over the reader NamedMessage used for the 8-byte channel hash: Position is 8 and
+        // Length includes the hash. Reading Length bytes overflowed and dropped every message until 0.17.3.
         private void Receive(ulong sender, FastBufferReader reader)
         {
             try
             {
-                int length = reader.Length;
+                int length = reader.Length - reader.Position;
                 if (length < 2 || length > 64) return;
                 byte[] data = new byte[length];
                 reader.ReadBytesSafe(ref data, length, 0);
