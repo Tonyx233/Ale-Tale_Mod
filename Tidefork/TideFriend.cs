@@ -11,7 +11,7 @@ namespace TonyMods
         private readonly TideCreature body;
         private readonly Dictionary<CreatureHostile, double> attacked = new Dictionary<CreatureHostile, double>();
         private readonly HashSet<CreatureHostile> candidates = new HashSet<CreatureHostile>();
-        private double nextScan, nextMove, stuckSince = -1;
+        private double nextScan, nextMove, lastFollow = -1, stuckSince = -1;
         private Vector3 lastProgress;
         internal PlayerNet Master { get; private set; }
 
@@ -40,6 +40,7 @@ namespace TonyMods
         {
             foreach (CreatureHostile enemy in new List<CreatureHostile>(attacked.Keys)) attacked[enemy] += seconds;
             nextScan += seconds; nextMove += seconds;
+            if (lastFollow >= 0) lastFollow += seconds;
             if (stuckSince >= 0) stuckSince += seconds;
         }
         internal bool Eligible(CreatureHostile enemy)
@@ -94,6 +95,9 @@ namespace TonyMods
             if (Master == null || !agent.enabled || !agent.isOnNavMesh) return;
             double now = TideSummons.Now;
             if (now < nextMove) return;
+            // Standing still through a fight or a volley is not being stuck: measure progress afresh.
+            if (lastFollow < 0 || now - lastFollow > 1) { lastProgress = body.transform.position; stuckSince = -1; }
+            lastFollow = now;
             nextMove = now + .25;
             float distance = Vector3.Distance(body.transform.position, Master.transform.position);
             agent.stoppingDistance = TideFriendRules.FollowDistance;

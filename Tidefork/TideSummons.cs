@@ -58,6 +58,12 @@ namespace TonyMods
         [Serializable] public sealed class Snapshot { public int version = 5, sequence, part, parts; public Record[] records; }
         internal static double Now { get { return NetworkManager.Singleton == null ? 0 : NetworkManager.Singleton.ServerTime.Time; } }
         internal static bool Owned(Component component) { return component != null && component.GetComponentInParent<TideCreature>() != null; }
+        // 十魚架(友) on any peer (clients know it from the snapshot): player weapons never hurt it and the M4 shoots through it.
+        internal static bool Friendly(Component component)
+        {
+            TideCreature creature = component == null ? null : component.GetComponentInParent<TideCreature>();
+            return creature != null && creature.State != null && creature.State.friendly;
+        }
 
         public void Initialize(ConfigFile config, ManualLogSource logger)
         {
@@ -104,8 +110,12 @@ namespace TonyMods
         // PetGuard sends from the host, but its hits must not be credited to player 0.
         private static void BeforePetHit(out int __state) { __state = petHitDepth; petHitDepth++; }
         private static void AfterPetHit(int __state) { petHitDepth = __state; }
-        private static void BeforeWeaponHit(NetworkBehaviour target, out ushort __state)
-        { var vulnerable = target as Vulnerable; __state = vulnerable == null ? (ushort)0 : vulnerable.hp.Value; }
+        // Skipping the receiver drops player (and PetGuard) hits on 十魚架(友) on the host, whatever the shooter's version.
+        private static bool BeforeWeaponHit(NetworkBehaviour target, out ushort __state)
+        {
+            var vulnerable = target as Vulnerable; __state = vulnerable == null ? (ushort)0 : vulnerable.hp.Value;
+            return !Friendly(vulnerable);
+        }
         // Only accepted player damage authorizes assist targets; rejected weapons/invulnerability do not.
         private static void AfterWeaponHit(NetworkBehaviour target, __RpcParams rpcParams, ushort __state)
         {

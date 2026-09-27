@@ -48,6 +48,8 @@ namespace TonyMods
         private int mask;
         private Interactive.Layer targetLayer;
         private readonly RaycastHit[] sweep = new RaycastHit[16];
+        // 十魚架(友) hitboxes a single shot may pass through (one per companion standing in the line of fire).
+        private const int FriendSteps = 8;
         private float heat, lastShot = -10, emptyAt, noiseAt, kick, pitchDebt, yawDebt, noticeUntil, hitAt = -10;
         private string notice;
         private Coroutine reload;
@@ -174,11 +176,20 @@ namespace TonyMods
             Vector3 origin = eye.position, direction = (eye.forward + eye.right * x + eye.up * y).normalized;
             RaycastHit hit;
             Vulnerable target;
-            float reach = M4Rules.Range;
-            if (Physics.Raycast(origin, direction, out hit, reach, mask, QueryTriggerInteraction.Ignore))
+            float reach = M4Rules.Range, skipped = 0;
+            // 十魚架(友) never stops a bullet: step through its hitbox and cast on from its far side (a cast that starts
+            // inside a collider cannot hit it). Past the step cap it just blocks, like any other obstacle.
+            for (int step = 0; Physics.Raycast(origin + direction * skipped, direction, out hit, reach - skipped, mask, QueryTriggerInteraction.Ignore); step++)
             {
+                if (step < FriendSteps && TideSummons.Friendly(hit.collider))
+                {
+                    skipped += hit.distance + .05f;
+                    if (skipped < reach) continue;
+                    break;
+                }
                 if (Target(hit, out target)) { Strike(target, direction, hit.point, hit.normal); return; }
-                reach = hit.distance;
+                reach = skipped + hit.distance;
+                break;
             }
             int count = Physics.SphereCastNonAlloc(origin, M4Rules.AssistRadius, direction, sweep, reach, mask, QueryTriggerInteraction.Ignore);
             int best = -1;
@@ -200,7 +211,7 @@ namespace TonyMods
         {
             target = null;
             Interactive interactive;
-            if (hit.transform == null || !hit.transform.TryGetComponent<Interactive>(out interactive) || (interactive.layer & targetLayer) != targetLayer) return false;
+            if (hit.transform == null || TideSummons.Friendly(hit.collider) || !hit.transform.TryGetComponent<Interactive>(out interactive) || (interactive.layer & targetLayer) != targetLayer) return false;
             target = hit.collider.GetComponentInParent<Vulnerable>();
             return target != null;
         }

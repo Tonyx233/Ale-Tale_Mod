@@ -56,5 +56,14 @@ try {
     Require (Body $mod TideSummons Remove) '(?s)TideCreature::Hide.*RemoveById' 'Recall must stop all future attacks immediately'
     Require (Body $game CreatureHostile HasChasedPlayer) '_chasedPlayer' 'Native owner threat API changed'
     Require (Body $mod TideSummons AfterPetHit) 'petHitDepth' 'Native pet attribution scope must unwind after errors'
+    # Players are the only thing that can hurt the companion (native monsters only hit players or defence-quest
+    # targets): the host drops those hits, and the M4 shoots through it on every peer.
+    $prefix = @(($mod.MainModule.Types | Where-Object Name -eq 'TideSummons').Methods | Where-Object Name -eq 'BeforeWeaponHit')
+    Require $prefix[0].ReturnType.FullName '^System\.Boolean$' 'Weapon-hit prefix must be able to skip the receiver'
+    Require (Body $mod TideSummons BeforeWeaponHit) 'TideSummons::Friendly' 'Player weapons must not damage the companion'
+    Require (Body $mod TideSummons Friendly) 'Record::friendly' 'Companion check must read the replicated friendly flag'
+    Require (Body $mod M4Rifle Shoot) 'TideSummons::Friendly' 'M4 bullets must pass through the companion'
+    Require (Body $mod M4Rifle Target) 'TideSummons::Friendly' 'M4 sweep must never pick the companion'
+    Require (Body $mod TideFriend Follow) 'TideFriend::lastFollow' 'Follow must restart stuck timing after a fight'
     "PASS: $count companion native API, damage routing, lifecycle and packaging checks"
 } finally { $mod.Dispose(); $game.Dispose() }

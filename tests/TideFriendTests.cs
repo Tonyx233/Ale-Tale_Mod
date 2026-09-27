@@ -69,6 +69,12 @@ internal static class TideFriendTests
         Check(agent.isStopped, "companion rests beside owner");
         TideSummons.Now += 1; body.transform.position = new Vector3(60, 0, 0); friend.Follow(agent);
         Check(agent.warps == 1, "far companion catches up like native pets");
+        // A fight in place makes no Follow calls; resuming afterwards must not read as 5 s stuck and warp at once.
+        TideSummons.Now += 1; body.transform.position = new Vector3(10, 0, 0); friend.Follow(agent);
+        TideSummons.Now += 8; friend.Follow(agent);
+        Check(agent.warps == 1, "standing through a fight is not being stuck");
+        for (int i = 0; i < 20; i++) { TideSummons.Now += .3; friend.Follow(agent); }
+        Check(agent.warps == 2, "a companion stuck while following still warps after 5 s");
         client.hp.Value = 0; Check(!friend.ResolveOwner(), "dead owner causes companion cleanup");
         client.hp.Value = 100; client.isDespawning = true; Check(!friend.ResolveOwner(), "disconnecting owner causes cleanup");
         client.isDespawning = false; PlayerManager.Instance.players.Remove(7);
