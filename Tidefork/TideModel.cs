@@ -164,7 +164,7 @@ namespace TonyMods
             float pulse = Mathf.Clamp01(1 - Mathf.Abs(release) / .4f);
             for (int i = 0; i < droplets.Count; i++)
             {
-                bool active = action >= TideRules.Bite && action <= TideRules.Wave && release >= 0 && release < .6f || hitFlash > 0;
+                bool active = TideRules.Melee(action) && release >= 0 && release < .6f || hitFlash > 0;
                 Transform drop = droplets[i]; drop.gameObject.SetActive(active);
                 if (!active) continue;
                 float t = hitFlash > 0 ? .3f - hitFlash : release;
@@ -184,12 +184,6 @@ namespace TonyMods
                 { warning.enabled = true; warning.positionCount = 5; float w = TideRules.BiteHalfWidth, r = TideRules.BiteReach; warning.SetPositions(new[] {new Vector3(-w,.035f,0),new Vector3(-w,.035f,r),new Vector3(w,.035f,r),new Vector3(w,.035f,0),new Vector3(-w,.035f,0)}); }
                 if (release >= 0 && release < .25f)
                 { effect.enabled = true; effect.positionCount = 3; effect.SetPositions(new[] {new Vector3(0,1.25f,.6f),new Vector3(.04f,1.22f,TideRules.BiteReach * .6f),new Vector3(0,1.18f,TideRules.BiteReach)}); }
-            }
-            else if (action == TideRules.Sweep)
-            {
-                torso.localRotation = Quaternion.Euler(0, release < 0 ? -30 * charge : -30 - 120 * Mathf.Clamp01(release / .35f), 0);
-                if (release < 0) Ring(warning, TideRules.SweepRadius, .035f, -60, 60);
-                if (release >= 0 && release < .4f) Ring(effect, TideRules.SweepRadius, .75f, -60, 60);
             }
             else if (action == TideRules.Wave)
             {

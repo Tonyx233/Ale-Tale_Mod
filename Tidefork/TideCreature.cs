@@ -140,7 +140,7 @@ namespace TonyMods
                 if (elapsed >= TideRules.Duration(TideRules.Summon)) { vulnerable.invinsible.Value = false; Enter(TideRules.Walk); }
                 return;
             }
-            if (State.action >= TideRules.Bite && State.action <= TideRules.Wave)
+            if (TideRules.Melee(State.action))
             {
                 Stop();
                 if (!hit && TideRules.CrossedHit(State.action, previousAge, elapsed)) { hit = true; Strike(State.action); }
@@ -168,7 +168,7 @@ namespace TonyMods
             if (distance <= TideRules.EngageDistance && ClearSight(target))
             {
                 Stop(); if (distance > .01f) transform.rotation = Quaternion.LookRotation(delta);
-                byte action = now >= nextWave ? TideRules.Wave : distance < TideRules.SweepDistance ? TideRules.Sweep : TideRules.Bite;
+                byte action = now >= nextWave ? TideRules.Wave : TideRules.Bite;
                 if (action == TideRules.Wave) nextWave = now + TideRules.WaveCooldown;
                 Enter(action); return;
             }
@@ -246,7 +246,7 @@ namespace TonyMods
             to = Vector3.zero; apex = 0;
             return false;
         }
-        // Shells land on their own clocks, whatever the idol is doing by then (walking, biting, sweeping).
+        // Shells land on their own clocks, whatever the idol is doing by then (walking, biting, sending a wave).
         private void Land(double now)
         {
             if (State.shotAt <= 0 || State.shotTo == null || State.shotApex == null) return;
