@@ -9,10 +9,16 @@ namespace TonyMods
         // Per-shot inventory RPCs are merged: at most one flush per FlushShots rounds or FlushSeconds.
         public const int FlushShots = 6;
         public const float FlushSeconds = .5f;
-        // Native spread is spreadAngle / FOV in viewport units, roughly degrees of radius.
-        public const float BaseSpread = .9f, SpreadPerShot = .14f, MaxSpread = 3.2f;
+        // Half-angle of the shot cone in degrees, the same in every direction (M4Rifle.Shoot). The native
+        // RaycastShot scales a viewport offset by spreadAngle / FOV, which on 16:9 spread 1.78x wider sideways.
+        public const float BaseSpread = .35f, SpreadPerShot = .07f, MaxSpread = 1.5f;
         public const float HeatHold = .12f, HeatDecay = 7f;
         public const float EmptyExtraReload = .4f;
+        // Native RaycastShot range. A thin ray that finds no hitbox is swept again as a sphere of AssistRadius
+        // metres: the native capsule hitboxes leave tails, snouts, limbs and spider legs uncovered.
+        public const float Range = 1000, AssistRadius = .2f;
+        // BepInEx keeps old defaults in existing cfg files; [M4] DefaultsRevision records the migrations run.
+        public const int DefaultDamage = 10, OldDefaultDamage = 9, DefaultsRevision = 1;
 
         public static float ShotInterval(int rpm)
         {
@@ -40,6 +46,20 @@ namespace TonyMods
         public static float CoolHeat(float heat, float dt, float sinceShot)
         {
             return sinceShot < HeatHold ? heat : Math.Max(0, heat - dt * HeatDecay);
+        }
+
+        // Tangent-plane offset (x right, y up, forward = 1) for a uniform point (u, v) in the unit disc,
+        // so the shot lands uniformly inside a round cone of half-angle spreadDegrees.
+        public static void ConeOffset(float spreadDegrees, float u, float v, out float x, out float y)
+        {
+            double t = Math.Tan(Math.Max(0, Math.Min(45, spreadDegrees)) * Math.PI / 180);
+            x = (float)(u * t); y = (float)(v * t);
+        }
+
+        // Revision 1: the damage default went from 9 to 10. A value the player changed is kept.
+        public static int MigrateDamage(int revision, int damage)
+        {
+            return revision < 1 && damage == OldDefaultDamage ? DefaultDamage : damage;
         }
 
         // Upward camera kick in degrees per shot, before the +/-15% random variation.

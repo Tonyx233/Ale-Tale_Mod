@@ -1,4 +1,6 @@
-## 0.19.0 十魚架(友)
+## 0.19.0 十魚架(友)、M4 命中判定與槍聲同步修正
+
+### 十魚架(友)
 
 - 商店新增「十魚架(友)」（ID `47941`，價格 1），與原本敵對「十魚架球」（`47940`）並存。
 - 背包使用道具召喚；再次使用收回。每位玩家最多一隻，道具不消耗，買多顆也不會增加上限。
@@ -9,10 +11,18 @@
 - 主人死亡／離線、讀檔／切換場景時收回召喚物；道具保留，可再次使用。不佔用原版寵物欄位，可與小山羊並存。
 - 由 host 處理選敵、血量與召喚；攻擊者使用原版 weapon RPC 的 SenderClientId。原版 PetGuard 的攻擊不算房主攻擊。
 - Tidefork 同步升為 `Tony.Tidefork.v5`，每包 2 隻；所有玩家須使用支援 v5 的版本。舊版玩家仍在房間時拒絕召喚，不扣道具。
-- 本分支只產出 build，未覆蓋已安裝 DLL、未合併 main。
+- 友軍測試執行實際 TideFriend controller 與從 source 抽出的 Throw transaction，Unity／網路服務使用 test doubles；另檢查編譯後的傷害分流與原版 API。這些不代替遊戲內 host/client、晚加入、地形與死亡重召實測。
 
-驗證：使用 Windows PowerShell 執行 `build.ps1`、`tests/run-tidefork.ps1`、`tests/run-tide-friend.ps1`。
-友軍測試執行實際 TideFriend controller 與從 source 抽出的 Throw transaction，Unity／網路服務使用 test doubles；另檢查編譯後的傷害分流與原版 API。這些不代替遊戲內 host/client、晚加入、地形與死亡重召實測。
+### M4 修正
+
+- **槍聲同步**：0.14.0～0.18.0 的 M4 網路訊息全部被丟掉（`reader.Length` 沒扣掉已讀的 8 byte 頻道 hash），所以聽不到隊友的槍聲／換彈聲、看不到對方的槍口火光與鏡，客機按 U 也拆不了鏡。改讀 `Length - Position`。
+- **命中判定**：準星在怪物身上卻常打不到。M4 改用自己的射線（規則照原生）：散布改成各方向相同的圓錐（首發 0.35°、每發 +0.07°、上限 1.5°），細射線沒打到 hitbox 時以 0.2 m 補掃；打中時準星閃白色 ✕。
+- **傷害 9 → 10**：舊 cfg 裡沒改過的 9 會自動遷移成 10（`[M4] DefaultsRevision = 1`），自訂值保留。
+- 細節見 [M4/README.md](M4/README.md)。
+
+### 驗證
+
+build 與全部 14 個 test runner 通過（`run-m4` 129／17,903／148、`run-tidefork` 135、`run-tide-friend` 36／16／17、scope、quick stack、9999 堆疊、馬匹、點唱機）。**尚未遊戲內實測**。`Tony.Tidefork.v5` 需要所有玩家同為 0.19.0；M4 槍聲要收聽的一方是 0.19.0 才聽得到。
 
 ## 0.18.0 十魚架被打會追擊攻擊者
 
