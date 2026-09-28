@@ -23,8 +23,9 @@ namespace TonyMods
             TideCreature body;TideHuntHome home;NavMeshAgent agent;
             var h=Setup(out body,out home,out agent); CreatureHostile wild=Enemy(50,true),quest=Enemy(40,false);
             Check(h.Allowed(wild,true),"natural wolf allowed");Check(!h.Allowed(quest,true),"quest/manual spawn excluded");
-            wild.transform.position=new Vector3(100,0,0);Check(h.Allowed(wild,true),"100 metre edge included");
-            wild.transform.position=new Vector3(100.01f,0,0);Check(!h.Allowed(wild,true),"outside edge excluded");
+            wild.transform.position=new Vector3(500,0,0);Check(h.Allowed(wild,true),"expanded 100-to-1000 metre territory included");
+            wild.transform.position=new Vector3(1000,0,0);Check(h.Allowed(wild,true),"1000 metre edge included");
+            wild.transform.position=new Vector3(1000.01f,0,0);Check(!h.Allowed(wild,true),"outside edge excluded");
             wild.transform.position=new Vector3(20,0,0);wild.GetComponent<Spawnable>().type=Spawnable.Species.SpiderBoss;
             Check(!h.Allowed(wild,true),"boss excluded even if natural");wild.GetComponent<Spawnable>().type=Spawnable.Species.Wolf;
             wild.gameObject.Add<PaddockAnimal>();Check(!h.Allowed(wild,true),"domestic animal excluded");
@@ -33,7 +34,7 @@ namespace TonyMods
             Check(!h.Allowed(wild,true),"NPC excluded");
             h=Setup(out body,out home,out agent);CreatureHostile a=Enemy(10,true),b=Enemy(20,true);
             UnityEngine.Random.Pick=1;Check(h.Target()==b,"random selection can choose farther prey");
-            b.transform.position=new Vector3(101,0,0);h.Hit(b,20);Check(b.GetComponent<Vulnerable>().hits==0,"impact rechecks leash");
+            b.transform.position=new Vector3(1001,0,0);h.Hit(b,20);Check(b.GetComponent<Vulnerable>().hits==0,"impact rechecks leash");
             a.GetComponent<Vulnerable>().invinsible.Value=true;Check(!h.Allowed(a,true),"invulnerable excluded");
             h=Setup(out body,out home,out agent);wild=Enemy(2,true);agent.reachable=false;
             Check(h.Target()==null,"unreachable prey rejected");agent.reachable=true;
@@ -66,7 +67,7 @@ namespace TonyMods
             home.Cargo.AddNewItem(new Item(new ItemData()){amount=6},out left,false);home.House.IsServer=false;home.DropAt(home.delivery);Check(home.Count==6,"client cannot deliver");
             home.House.IsServer=true;Master.Instance.Joining=true;home.DropAt(home.delivery);Check(home.Count==6,"joining player defers delivery");Master.Instance.Joining=false;
             home.House.isHelperActive.Value=true;h.Died();Check(home.Count==0&&!home.Active,"death drops cargo and stops work");
-            Check(TideHuntRules.Within(60,80)&&!TideHuntRules.Within(float.NaN,0),"radial and finite boundary");
+            Check(TideHuntRules.Within(600,800)&&!TideHuntRules.Within(float.NaN,0),"radial and finite boundary");
             Check(!TideHuntRules.Species("SkeletonBoss")&&!TideHuntRules.Species("FutureUnknown"),"allowlist fails closed");
             h=Setup(out body,out home,out agent);home.Cargo.AddNewItem(new Item(new ItemData()){amount=30},out left,false);
             TideSummons.Now+=100;h.Target();h.Move(agent);Check(body.transform.position.x==0,"time spent fighting is not return-path stuck time");

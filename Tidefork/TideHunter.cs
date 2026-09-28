@@ -31,6 +31,21 @@ namespace TonyMods
         internal TideHunter(TideCreature creature, TideHuntHome home)
         { body = creature; Home = home; progress = body.transform.position; stuckSince = TideSummons.Now; }
         internal bool Ready { get { return Home != null && Home.House != null && Home.House.IsSpawned; } }
+        internal string Diagnostics()
+        {
+            int eligible = 0, reachable = 0;
+            foreach (Spawnable spawn in TideHuntBuilding.Natural.ToArray())
+            {
+                if (spawn == null) continue;
+                CreatureBase c = spawn.GetComponent<CreatureBase>();
+                if (!Allowed(c, true)) continue;
+                eligible++;
+                if (Reachable(c.transform.position)) reachable++;
+            }
+            return "natural=" + TideHuntBuilding.Natural.Count + ", eligible=" + eligible + ", reachable=" + reachable +
+                ", prey=" + (prey == null ? "none" : prey.transform.position.ToString()) + ", returning=" + returning +
+                ", corpses=" + corpses.Count + ", drops=" + Drops.Count;
+        }
         private void BeginReturn()
         {
             if (returning) return;

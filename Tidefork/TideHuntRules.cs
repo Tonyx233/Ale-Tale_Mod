@@ -6,7 +6,7 @@ namespace TonyMods
     {
         internal const ushort ItemId = 47942;
         internal const int ReturnCount = 30;
-        internal const float Radius = 100;
+        internal const float Radius = 1000;
         // Fail closed: only naturally spawned, ordinary creatures from this explicit list qualify.
         internal static bool Species(string type)
         {

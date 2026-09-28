@@ -106,6 +106,7 @@ namespace TonyMods
             }
             catch (Exception) { }
         }
+        internal string HuntingDiagnostics() { return hunter == null ? "hunter=missing" : hunter.Diagnostics(); }
         internal void Apply(TideSummons.Record record)
         { State = record; hidden = false; if (model != null) model.gameObject.SetActive(true); }
         // Every recall/despawn path (Remove, Clear) goes through here, before the NetworkObject is destroyed.

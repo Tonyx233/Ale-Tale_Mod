@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace TonyMods
 {
-    [BepInPlugin("Tony.TeammateHealthBars", "Tony Ale & Tale Mods", "0.21.2")]
+    [BepInPlugin("Tony.TeammateHealthBars", "Tony Ale & Tale Mods", "0.21.3")]
     [BepInDependency(ItemStacks.LegacyStack, BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency(ItemStacks.LegacyFood, BepInDependency.DependencyFlags.SoftDependency)]
     public sealed class TeammateHealthBars : BaseUnityPlugin
@@ -36,7 +36,7 @@ namespace TonyMods
             panel = Config.Bind("Display", "TeamPanel", true, "Show yourself and teammates at the left-center of the screen, including solo play.");
             scale = Config.Bind("Display", "UIScale", 1f, new ConfigDescription("UI size multiplier.", new AcceptableValueRange<float>(0.5f, 2f)));
             leftMargin = Config.Bind("Display", "LeftMargin", 8f, new ConfigDescription("Team panel distance from the left edge.", new AcceptableValueRange<float>(0f, 200f)));
-            Logger.LogInfo("Tony Ale & Tale Mods 0.21.2 loaded (health panel + YouTube jukebox + original horse + five-seat Horse 2 + X horse storage + musket scope + same-quality chest quick stack + M4A1 rifle with interchangeable optics + Tidefork summons with water shell volleys and attacker hunts + friendly Tidefork companion that monsters fight back + Tidefork hunting houses with 100 m territory and 30-item deliveries).");
+            Logger.LogInfo("Tony Ale & Tale Mods 0.21.3 loaded (health panel + YouTube jukebox + original horse + five-seat Horse 2 + X horse storage + musket scope + same-quality chest quick stack + M4A1 rifle with interchangeable optics + Tidefork summons with water shell volleys and attacker hunts + friendly Tidefork companion that monsters fight back + Tidefork hunting houses with 1000 m territory and 30-item deliveries).");
             try { MusketScope.Initialize(Config, Logger); }
             catch (Exception ex) { Logger.LogError("Musket scope initialization failed: " + ex); }
             gameObject.AddComponent<YouTubeJukeboxPanel>().Initialize(Logger);

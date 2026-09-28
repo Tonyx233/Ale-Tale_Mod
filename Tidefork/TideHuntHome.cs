@@ -19,6 +19,25 @@ namespace TonyMods
         private bool? lastActive;
         private Vector3 delivery;
         private bool hasDelivery;
+        private double nextDiagnostic;
+        private Vector3 diagnosticPosition;
+        private void DiagnoseMovement()
+        {
+            if (Body == null || TideSummons.Now < nextDiagnostic) return;
+            nextDiagnostic = TideSummons.Now + 10;
+            var agent = Body.GetComponent<NavMeshAgent>();
+            bool onMesh = agent != null && agent.enabled && agent.isOnNavMesh;
+            Vector3 position = Body.transform.position;
+            string nav = !onMesh ? "onMesh=false" : "onMesh=true, stopped=" + agent.isStopped +
+                ", pending=" + agent.pathPending + ", hasPath=" + agent.hasPath + ", path=" + agent.pathStatus +
+                ", remaining=" + agent.remainingDistance + ", destination=" + agent.destination +
+                ", velocity=" + agent.velocity + ", desired=" + agent.desiredVelocity + ", speed=" + agent.speed +
+                ", updatePosition=" + agent.updatePosition + ", nextPosition=" + agent.nextPosition;
+            Debug.Log("Tide hunting navigation: base=" + transform.position + ", worker=" + position +
+                ", moved=" + Vector3.Distance(position, diagnosticPosition) + ", action=" + Body.State.action +
+                ", active=" + Active + ", cargo=" + Count + ", delivery=" + hasDelivery + "; " + nav + "; " + Body.HuntingDiagnostics());
+            diagnosticPosition = position;
+        }
         private string status = "準備出勤";
         internal void Report(string value)
         {
@@ -79,6 +98,7 @@ namespace TonyMods
                 // Cargo has no public inventory UI; native container serialization preserves every Item field.
                 if (Cargo.size.Value.x * Cargo.size.Value.y < 256) Cargo.Resize(new Vector2Int(16, 16));
                 GetDelivery(out delivery);
+                DiagnoseMovement();
                 House.GetComponent<Furniture>().isRemoveAvailable.Value = Count == 0;
                 if (Body != null && Body.GetComponent<Vulnerable>().hp.Value == 0)
                 {

@@ -482,7 +482,7 @@ namespace TonyMods
             // Named after the source sculpture; name and caption read the same in every locale.
             string[] values = { "十魚架球", "十魚架\n天野 裕夫\n平成元年3月", zh ? "投擲召喚十魚架" : "Throw to summon 十魚架",
                 "十魚架(友)", "跟隨召喚者，只攻擊威脅主人或被主人攻擊的怪物。每人限一隻；再次使用收回。道具不消耗，死亡後可重新召喚滿血個體。", "召喚／收回十魚架(友)",
-                "十魚架(狩獵)", "狩獵基地：隨機狩獵基地100公尺內的自然野生動物與普通怪物。30件戰利品後返回酒館招牌外側放下，繼續出勤。長按啟用／召回；排除任務怪、家畜、NPC與Boss。" };
+                "十魚架(狩獵)", "狩獵基地：隨機狩獵基地1000公尺內的自然野生動物與普通怪物。30件戰利品後返回酒館招牌外側放下，繼續出勤。長按啟用／召回；排除任務怪、家畜、NPC與Boss。" };
             for (int i = 0; i < keys.Length; i++) { var entry = handle.Result.GetEntry(keys[i]); if (entry == null) handle.Result.AddEntry(keys[i], values[i]); else entry.Value = values[i]; }
             var titles = LocalizationSettings.StringDatabase.GetTableAsync("Interactive"); yield return titles;
             if (titles.Result != null)
