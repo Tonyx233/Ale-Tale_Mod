@@ -70,7 +70,9 @@ namespace TonyMods
             }
             if (!House.IsServer || Time.timeScale <= 0 || TideSummons.Now < nextCheck) return;
             nextCheck = TideSummons.Now + 1;
-            if (SaveManager.Instance != null && SaveManager.Instance.isLoadingGame) { Report("等待讀檔完成"); return; }
+            // isLoadingGame describes how this session started and stays true throughout a loaded game.
+            // Native PlayerManager marks the host ready only after its local player has spawned.
+            if (Master.Instance == null || !Master.Instance.isHostReady) { Report("等待房主角色就緒"); return; }
             if (Master.Instance != null && Master.Instance.HasConnectingClients()) { Report("等待玩家連線完成"); return; }
             try
             {

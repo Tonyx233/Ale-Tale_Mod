@@ -60,6 +60,10 @@ try {
     $spawnGuard = [regex]::Match($source, 'if \(Body == null[^\r\n]*').Value
     Require ($spawnGuard -and $spawnGuard -notmatch 'hasDelivery') 'Worker visibility must not depend on finding a delivery point'
     Require ((Body $mod TideSummons SpawnHunter) -match 'TideHuntHome::Report') 'Silent spawn failures must report waiting reasons'
+    Require ((Body $mod TideHuntHome Update) -notmatch 'SaveManager::isLoadingGame') 'Loaded sessions must not remain blocked by the persistent load-origin flag'
+    Require ((Body $mod TideHuntHome Update) -match 'Master::isHostReady') 'Workers must wait for actual host readiness'
+    Require ((Body $game PlayerManager OnPlayerSpawn) -match '(?s)ldc.i4.1.*Master::SetHostReady') 'Native player spawn no longer marks host ready'
+    Require ((Body $game PlayerManager OnNetworkDespawn) -match '(?s)ldc.i4.0.*Master::SetHostReady') 'Native player teardown no longer resets host readiness'
     foreach ($name in @('Boar','Wolf','Bear','Hornet','Turtle','Crab','Toad','Rabbit','Wildfowl','SkeletonWarrior2H','SkeletonWarriorShield','OrcMelee','Zombie','Spider','ZombieHound','Ghoul','Mummy','Snake','Snail','Slug')) {
         $enum = (NativeType $game Spawnable).NestedTypes | Where-Object Name -eq Type
         Require ($null -ne ($enum.Fields | Where-Object Name -eq $name)) "Native species removed: $name"
