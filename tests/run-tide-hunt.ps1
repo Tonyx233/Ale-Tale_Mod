@@ -55,6 +55,11 @@ try {
     Require ((Body $mod TideHuntBuilding HouseSpawn) -notmatch 'NetworkBehaviour') 'Do not add NetworkBehaviours to native house'
     Require ((Body $mod TideHuntBuilding '(Register|<Register>.*)') -match 'ItemData::netPrefab') 'Native building template lookup missing'
     Require ((Body $mod TideHuntHome GetDelivery) -match 'TavernSign') 'Delivery must locate the tavern front'
+    Require ((Body $mod TideHuntHome Initialize) -match 'SaveManager::isLoadingGame') 'Fresh placement must not inherit a serialized inactive helper default'
+    Require ((Body $game HelperHouse OnNetworkSpawn) -match '(?s)SaveManager::isLoadingGame.*HelperHouse::savedHelperHouse') 'Native helper restore guard changed'
+    $spawnGuard = [regex]::Match($source, 'if \(Body == null[^\r\n]*').Value
+    Require ($spawnGuard -and $spawnGuard -notmatch 'hasDelivery') 'Worker visibility must not depend on finding a delivery point'
+    Require ((Body $mod TideSummons SpawnHunter) -match 'TideHuntHome::Report') 'Silent spawn failures must report waiting reasons'
     foreach ($name in @('Boar','Wolf','Bear','Hornet','Turtle','Crab','Toad','Rabbit','Wildfowl','SkeletonWarrior2H','SkeletonWarriorShield','OrcMelee','Zombie','Spider','ZombieHound','Ghoul','Mummy','Snake','Snail','Slug')) {
         $enum = (NativeType $game Spawnable).NestedTypes | Where-Object Name -eq Type
         Require ($null -ne ($enum.Fields | Where-Object Name -eq $name)) "Native species removed: $name"

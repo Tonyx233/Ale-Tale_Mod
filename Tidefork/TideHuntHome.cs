@@ -19,6 +19,13 @@ namespace TonyMods
         private bool? lastActive;
         private Vector3 delivery;
         private bool hasDelivery;
+        private string status = "準備出勤";
+        internal void Report(string value)
+        {
+            if (status == value) return;
+            status = value;
+            Debug.Log("Tide hunting base " + transform.position + ": " + value);
+        }
         internal int Count
         {
             get { return Cargo.orderedItems == null ? 0 : Cargo.orderedItems.Sum(i => (int)i.amount); }
@@ -32,12 +39,13 @@ namespace TonyMods
             house.interactive.ObjectTitle = "TonyTideHuntName";
             if (house.IsServer)
             {
-                house.isHelperActive.Value = house.savedHelperHouse == null || house.savedHelperHouse.isHelperActive;
+                house.isHelperActive.Value = SaveManager.Instance == null || !SaveManager.Instance.isLoadingGame ||
+                    house.savedHelperHouse == null || house.savedHelperHouse.isHelperActive;
                 house.container.contName.Value = TideHuntBuilding.Marker;
             }
             // A small local sign identifies the independent variant without changing network prefab components.
             var sign = new GameObject("TideHuntSign"); sign.transform.SetParent(transform, false);
-            sign.transform.localPosition = new Vector3(0, 1.8f, 0);
+            sign.transform.localPosition = new Vector3(0, 3.2f, 0);
             label = sign.AddComponent<TextMeshPro>(); label.fontSize = 2;
             label.alignment = TextAlignmentOptions.Center;
             label.rectTransform.sizeDelta = new Vector2(4, 1);
@@ -52,7 +60,7 @@ namespace TonyMods
             if (closed || House == null || !House.IsSpawned) return;
             if (label != null)
             {
-                label.text = "十魚架(狩獵)\n" + Count + "/30  " + (Active ? "啟用" : "返回／待命");
+                label.text = "十魚架(狩獵)\n" + Count + "/30  " + (House.IsServer ? status : (Active ? "啟用" : "返回／待命"));
                 if (Camera.main != null) label.transform.rotation = Camera.main.transform.rotation;
             }
             if (lastActive != Active)
@@ -62,8 +70,8 @@ namespace TonyMods
             }
             if (!House.IsServer || Time.timeScale <= 0 || TideSummons.Now < nextCheck) return;
             nextCheck = TideSummons.Now + 1;
-            if (SaveManager.Instance != null && SaveManager.Instance.isLoadingGame) return;
-            if (Master.Instance != null && Master.Instance.HasConnectingClients()) return;
+            if (SaveManager.Instance != null && SaveManager.Instance.isLoadingGame) { Report("等待讀檔完成"); return; }
+            if (Master.Instance != null && Master.Instance.HasConnectingClients()) { Report("等待玩家連線完成"); return; }
             try
             {
                 // Cargo has no public inventory UI; native container serialization preserves every Item field.
@@ -76,15 +84,19 @@ namespace TonyMods
                     DropAt(Body.transform.position); House.isHelperActive.Value = false;
                     nextSpawn = TideSummons.Now + 10;
                 }
-                if (Body == null && (Active || Count > 0) && TideSummons.Now >= nextSpawn && hasDelivery)
+                if (Body != null) Report(!hasDelivery ? "已生成，等待酒館交貨點" : Active ? "出勤中" : "返回／待命");
+                else if (!Active && Count == 0) Report("已停工，長按開始狩獵");
+                // The worker must be visible even when delivery-point discovery has not succeeded yet.
+                if (Body == null && (Active || Count > 0) && TideSummons.Now >= nextSpawn)
                 {
                     nextSpawn = TideSummons.Now + 5;
                     NavMeshHit nav;
                     if (NavMesh.SamplePosition(transform.position + transform.forward * 2, out nav, 4, NavMesh.AllAreas))
                         Body = TideSummons.SpawnHunter(this, nav.position);
+                    else Report("基地附近無可行走地面，請移到戶外");
                 }
             }
-            catch (Exception ex) { House.isHelperActive.Value = false; Debug.LogError("Tide hunting paused, cargo retained: " + ex); }
+            catch (Exception ex) { House.isHelperActive.Value = false; Report("生成或工作失敗，請查看 log"); Debug.LogError("Tide hunting paused, cargo retained: " + ex); }
         }
         internal bool GetDelivery(out Vector3 point)
         {
@@ -97,7 +109,7 @@ namespace TonyMods
                 if (outward.sqrMagnitude > .1f)
                 {
                     Vector3 desired = sign.transform.position + outward.normalized * 3;
-                    desired.y = Game.tavernCenter.y;
+                    // Use the sign's actual elevation; tavernCenter.y is a fixed world constant, not terrain height.
                     NavMeshHit nav;
                     // Native ground loot inside tavernRadius also survives reload without auto-selling.
                     if (NavMesh.SamplePosition(desired, out nav, 6, NavMesh.AllAreas) &&

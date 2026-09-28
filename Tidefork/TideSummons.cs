@@ -411,22 +411,26 @@ namespace TonyMods
         internal static TideCreature SpawnHunter(TideHuntHome home, Vector3 ground)
         {
             var self = instance;
-            if (self == null || self.network == null || !self.network.IsServer || !self.friendReady || !self.huntReady) return null;
+            if (self == null || self.network == null || !self.network.IsServer || !self.friendReady || !self.huntReady)
+            { home.Report("等待房主狩獵模組就緒"); return null; }
             foreach (ulong peer in self.network.ConnectedClientsIds)
             {
                 float seen;
-                if (peer != self.network.LocalClientId && (!self.peers.TryGetValue(peer, out seen) || Time.unscaledTime - seen > 5)) return null;
+                if (peer != self.network.LocalClientId && (!self.peers.TryGetValue(peer, out seen) || Time.unscaledTime - seen > 5))
+                { home.Report("等待所有玩家更新並完成同步"); return null; }
             }
             Spawnable spawn = null;
             try
             {
-                if (!SpawnManager.Instance.ManualSpawn(Spawnable.Type.Spider, ground, Quaternion.identity, out spawn, true) || spawn == null) return null;
+                if (!SpawnManager.Instance.ManualSpawn(Spawnable.Type.Spider, ground, Quaternion.identity, out spawn, true) || spawn == null)
+                { home.Report("原版生成器暫時無法生成，稍後重試"); return null; }
                 if (!spawn.IsSpawned) throw new InvalidOperationException("Hunt spawn deferred");
                 var record = new Record { id = spawn.NetworkObjectId, scene = SceneManager.GetActiveScene().name,
                     friendly = true, hunting = true, action = TideRules.Summon, started = Now, born = Now, from = ground + Vector3.up, landing = ground };
                 var creature = spawn.gameObject.AddComponent<TideCreature>();
                 creature.Initialize(self, record, true); creature.SetHunter(home);
                 self.creatures.Add(record.id, creature); self.Changed();
+                home.Report("十魚架已生成");
                 return creature;
             }
             catch
