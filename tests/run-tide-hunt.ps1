@@ -22,7 +22,7 @@ function NativeType($asm,$name) { $asm.MainModule.Types | Where-Object Name -eq 
 function AllMethods($t) { $t.Methods; foreach ($n in $t.NestedTypes) { AllMethods $n } }
 function Body($asm,$type,$method) { ((AllMethods (NativeType $asm $type)) | Where-Object Name -match ('^'+$method+'$') | ForEach-Object { $_.Body.Instructions | ForEach-Object ToString }) -join "`n" }
 try {
-    # Verify exact native IL assumptions used by the three furniture instantiate wrappers.
+    # Verify native item/save locals and factory signatures used by the furniture result marker.
     foreach ($m in (NativeType $game FurnitureManager).Methods | Where-Object Name -eq PlaceFurnitureServerRpc) {
         Require ($m.Body.Variables[2].VariableType.FullName -eq 'Item') 'Placement no longer has selected Item at local 2'
         $calls = @($m.Body.Instructions | Where-Object { $_.Operand -and $_.Operand.ToString() -match 'Object::Instantiate<UnityEngine.GameObject>' })

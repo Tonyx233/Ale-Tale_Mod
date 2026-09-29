@@ -59,36 +59,43 @@ namespace TonyMods
             item.levelDependant = 0; item.questDependant = 0; item.quest = false; item.doNotSave = false;
             items.Add(item);
         }
-        // Both placement overloads keep the selected Item in local 2; load keeps SavedDevice in local 2.
-        // Match exactly one instantiate and fail at startup if the native contract changes.
+        // Preserve the existing factory call so Farmer Owl can route its own item IDs.
+        // Decorating its result works both before and after Farmer Owl's transpiler.
         private static IEnumerable<CodeInstruction> Place(IEnumerable<CodeInstruction> source) { return Rewrite(source, false); }
         private static IEnumerable<CodeInstruction> Load(IEnumerable<CodeInstruction> source) { return Rewrite(source, true); }
+        private static bool IsFurnitureFactory(MethodInfo method, bool load)
+        {
+            if (method == null || !method.IsStatic || method.ReturnType != typeof(GameObject)) return false;
+            bool native = method.DeclaringType == typeof(UnityEngine.Object) && method.Name == "Instantiate";
+            bool farmer = method.DeclaringType.FullName == "KinkoCraft.FarmerOwl.PrefabPatch" &&
+                method.DeclaringType.Assembly.GetName().Name == "KinkoCraft.FarmerOwl" &&
+                method.Name == (load ? "InstantiateFurnitureOnLoad" : "InstantiateFurniture");
+            if (!native && !farmer) return false;
+            Type[] expected = load ? new[] { typeof(GameObject), typeof(Vector3), typeof(Quaternion), typeof(Transform) }
+                : new[] { typeof(GameObject), typeof(Vector3), typeof(Quaternion) };
+            if (farmer) expected = expected.Concat(new[] { typeof(uint) }).ToArray();
+            return method.GetParameters().Select(p => p.ParameterType).SequenceEqual(expected);
+        }
         private static IEnumerable<CodeInstruction> Rewrite(IEnumerable<CodeInstruction> source, bool load)
         {
             var code = source.ToList(); int found = 0;
             for (int i = 0; i < code.Count; i++)
             {
-                var method = code[i].operand as MethodInfo;
-                if (method == null || method.DeclaringType != typeof(UnityEngine.Object) || method.Name != "Instantiate" ||
-                    method.ReturnType != typeof(GameObject) || method.GetParameters().Length != (load ? 4 : 3)) continue;
-                // The load method also instantiates new-game furniture: only the first call uses SavedDevice.
+                if (code[i].opcode != OpCodes.Call || !IsFurnitureFactory(code[i].operand as MethodInfo, load)) continue;
+                // Loading also creates default furniture; only the first factory uses SavedDevice.
                 if (load && found > 0) continue;
-                var first = new CodeInstruction(OpCodes.Ldloc_2);
-                first.labels.AddRange(code[i].labels); code[i].labels.Clear();
-                first.blocks.AddRange(code[i].blocks); code[i].blocks.Clear();
-                code.Insert(i++, first);
-                code.Insert(i++, new CodeInstruction(OpCodes.Ldfld, AccessTools.Field(load ? typeof(SavedDevice) : typeof(Item), load ? "itemDataId" : "dataId")));
-                code[i].opcode = OpCodes.Call;
-                code[i].operand = AccessTools.Method(typeof(TideHuntBuilding), load ? "InstantiateLoad" : "InstantiatePlace");
+                var mark = new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(TideHuntBuilding), "Mark"));
+                // Keep end-of-exception metadata after the complete stack operation.
+                mark.blocks.AddRange(code[i].blocks.Where(b => b.blockType == ExceptionBlockType.EndExceptionBlock));
+                code[i].blocks.RemoveAll(b => b.blockType == ExceptionBlockType.EndExceptionBlock);
+                code.Insert(++i, new CodeInstruction(OpCodes.Ldloc_2));
+                code.Insert(++i, new CodeInstruction(OpCodes.Ldfld, AccessTools.Field(load ? typeof(SavedDevice) : typeof(Item), load ? "itemDataId" : "dataId")));
+                code.Insert(++i, mark);
                 found++;
             }
             if (found != 1) throw new InvalidOperationException("Hunt house instantiate contract changed: " + found);
             return code;
         }
-        private static GameObject InstantiatePlace(GameObject prefab, Vector3 pos, Quaternion rot, ushort id)
-        { return Mark(UnityEngine.Object.Instantiate(prefab, pos, rot), id); }
-        private static GameObject InstantiateLoad(GameObject prefab, Vector3 pos, Quaternion rot, Transform parent, ushort id)
-        { return Mark(UnityEngine.Object.Instantiate(prefab, pos, rot, parent), id); }
         private static GameObject Mark(GameObject go, ushort id)
         {
             if (id != TideHuntRules.ItemId) return go;

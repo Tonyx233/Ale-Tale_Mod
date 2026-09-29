@@ -1,4 +1,4 @@
-# 十魚架(狩獵) — 0.21.3
+# 十魚架(狩獵) — 0.21.4
 
 商店購買 ID `47942`（價格 1），像原版貓頭鷹建築一樣放置。外觀沿用清潔貓頭鷹建築，另外顯示名稱、貨量與啟用狀態；工作個體使用現有十魚架模型、攻擊與血量。每座基地各有一隻，不占「十魚架(友)」的每人召喚名額。長按互動切換啟用；停工會先帶現有貨物到酒館前交貨。
 
@@ -30,3 +30,11 @@
 `build.ps1` 產生 0.21.0 DLL。`tests/run-tide-hunt.ps1` 執行實際 `TideHunter` 與抽出的實際交貨方法，Unity／network 使用 test doubles：42 項選敵排除、傷害時重新檢查、掉落一次性、30 件返航、物品欄位保留、部分入庫、死亡掉落、卡住計時與失敗重試檢查。另有 51 項 Cecil 檢查原版放置／讀檔方法、容器保存、掉落、同步與編譯後傷害分流。
 
 上述不是遊戲內測試。實機仍需驗證：host 與 client 購買放置、原版貓頭鷹未受影響、出勤和怪物反擊、實際前門交貨、長按停工、攜貨存讀檔、死亡、晚加入及多人拾取不重複。此次交付 source/build，不替換遊戲安裝目錄的 DLL。
+
+## Farmer Owl 相容性（0.21.4）
+
+朋友提供的 Farmer Owl 1.0.0（SHA256 `F9CC013510ABB32426CB1310298A8142A5AAF8AE5295164AC48C8F859C823E9F`）會替換原版家具 `Instantiate` 呼叫。舊版狩獵 patch 只辨識原版呼叫，因此報 `Hunt house instantiate contract changed: 0`，停用後不註冊物品 47942；房主 log 隨後出現 6 次購買找不到物品資料。
+
+新版保留既有 factory，於返回結果後加入狩獵標記，不改第三方 DLL。TimeDisplay（SHA256 `64B4F4E5FEFBE2C254821A7990BB6A8751B601286DA9DDAB02EC19E01F03B52C`）的 Harmony patch 目標是 `PlayerUI.Start`，未涉及本次家具衝突。
+
+驗證指令：`tests/run-tide-hunt-compat.ps1 -FarmerOwlPath <Farmer Owl DLL 路徑>`。測試直接使用遊戲原生 IL、正式 Mod transpiler 與指定 Farmer Owl DLL，在兩種順序下驗證放置 overloads 與讀檔，並使用遊戲 Mono/Harmony 編譯組合 patch。未啟動 Unity、不呼叫購買或生成流程，因此仍須多人實測。

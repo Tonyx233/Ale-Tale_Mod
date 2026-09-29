@@ -20,6 +20,7 @@ namespace TonyMods
 {
     public sealed class HorseStable : MonoBehaviour
     {
+        private const int MaxHorses = 64, ManifestBytes = 131072;
         private const string Channel = "Tony.HorseStable.v090";
         public const ushort ItemId = 47920, Item2Id = 47921;
         private static HorseStable instance;
@@ -104,14 +105,14 @@ namespace TonyMods
         }
         private void Send(ulong id, string json)
         {
-            using (var writer = new FastBufferWriter(32768, Allocator.Temp))
+            using (var writer = new FastBufferWriter(ManifestBytes, Allocator.Temp))
             { writer.WriteValueSafe(json); network.CustomMessagingManager.SendNamedMessage(Channel, id, writer, NetworkDelivery.ReliableFragmentedSequenced); }
         }
         private void Receive(ulong sender, FastBufferReader reader)
         {
             try
             {
-                if (reader.Length > 32768) return;
+                if (reader.Length > ManifestBytes) return;
                 string json; reader.ReadValueSafe(out json, false);
                 if (network.IsServer)
                 {
@@ -153,7 +154,7 @@ namespace TonyMods
         }
         private static bool Valid(Snapshot s)
         {
-            if (s == null || (s.version != 1 && s.version != 2) || s.horses == null || s.horses.Length > 32) return false;
+            if (s == null || (s.version != 1 && s.version != 2) || s.horses == null || s.horses.Length > MaxHorses) return false;
             var ids = new HashSet<string>();
             foreach (Record r in s.horses)
             {
@@ -259,7 +260,7 @@ namespace TonyMods
             float last;
             if (lastUse.TryGetValue(sender,out last) && Time.unscaledTime-last < .5f) return;
             lastUse[sender] = Time.unscaledTime;
-            if (horses.Count >= 32) { Note(sender,"Stable limit reached (32 horses). Item was not consumed."); return; }
+            if (horses.Count >= MaxHorses) { log.LogInfo("Horse placement denied: limit=" + MaxHorses + "; active=" + horses.Count + "; client=" + sender); Note(sender,"Stable limit reached (64 horses total). Item was not consumed."); return; }
             foreach (var h in horses.Values) if (h.HasRider(sender)) { Note(sender,"Dismount before placing another horse."); return; }
             Vector3 ground;
             if (!FindGround(player, variant, out ground)) { Note(sender,"Use the horse item in a clear outdoor area. Item was not consumed."); return; }
@@ -267,6 +268,7 @@ namespace TonyMods
             try { Spawn(record); }
             catch (Exception ex) { log.LogError("Horse creation failed; item retained: " + ex); return; }
             if (!container.RemoveItemAmount(itemId,1)) { Destroy(horses[record.id].gameObject); horses.Remove(record.id); return; }
+            log.LogInfo("Horse placed: horse=" + record.id + "; variant=" + variant + "; client=" + sender + "; active=" + horses.Count);
             Note(sender,variant == HorseVariant.Extended ? "Horse 2 placed (5 seats). E mounts; Ctrl+1-5 changes seats." : "Horse placed. E mounts; Ctrl+1/2 changes seats."); Broadcast();
         }
         private static bool FindGround(PlayerNet player, int variant, out Vector3 ground)
@@ -368,7 +370,7 @@ namespace TonyMods
             try
             {
                 string file=SavePath(loadKey);if(!File.Exists(file))return;
-                if(new FileInfo(file).Length>65536)throw new InvalidDataException("Horse save too large");
+                if(new FileInfo(file).Length>ManifestBytes)throw new InvalidDataException("Horse save too large");
                 Snapshot s=HorseJson.Deserialize<Snapshot>(File.ReadAllText(file));if(!Valid(s))throw new InvalidDataException("Invalid horse save");
                 foreach(Record r in s.horses)Spawn(r);
                 log.LogInfo("Restored "+s.horses.Length+" horses for this save snapshot.");

@@ -52,18 +52,25 @@ class HorseJsonTests
         string oldJson="{\"version\":1,\"horses\":[{\"id\":\""+id+"\",\"scene\":\"Tavern\",\"position\":{\"x\":0,\"y\":0,\"z\":0},\"yaw\":0}]}";
         object legacy=codec.GetMethod("Deserialize").MakeGenericMethod(snapshotType).Invoke(null,new object[]{oldJson});
         Check((bool)valid.Invoke(null,new[]{legacy}) && (int)recordType.GetField("variant").GetValue(((Array)snapshotType.GetField("horses").GetValue(legacy)).GetValue(0))==0,"Old sidecar without variant loads original horse");
-        Array mixed=Array.CreateInstance(recordType,32);
-        for(int i=0;i<32;i++)
+        Array mixed=Array.CreateInstance(recordType,64);
+        for(int i=0;i<64;i++)
         {
             object entry=Activator.CreateInstance(recordType);
             recordType.GetField("id").SetValue(entry,Guid.NewGuid().ToString("N"));
-            recordType.GetField("scene").SetValue(entry,new string('T',128));
+            recordType.GetField("scene").SetValue(entry,new string('\u0001',128));
             recordType.GetField("position").SetValue(entry,new Vector3(99999,-99999,99999));
             recordType.GetField("variant").SetValue(entry,i%2);mixed.SetValue(entry,i);
         }
         snapshotType.GetField("horses").SetValue(snapshot,mixed);
         string manifest=(string)codec.GetMethod("Serialize").Invoke(null,new[]{snapshot});
-        Check((bool)valid.Invoke(null,new[]{snapshot}) && System.Text.Encoding.Unicode.GetByteCount(manifest)+8<32768,"32 mixed horses fit fragmented manifest writer");
+        Check((bool)valid.Invoke(null,new[]{snapshot}) && System.Text.Encoding.Unicode.GetByteCount(manifest)+8<131072,"64 mixed horses with escaped scene names fit fragmented manifest writer");
+        object fullCopy = codec.GetMethod("Deserialize").MakeGenericMethod(snapshotType).Invoke(null,new object[]{manifest});
+        Check((bool)valid.Invoke(null,new[]{fullCopy}) && ((Array)snapshotType.GetField("horses").GetValue(fullCopy)).Length==64,"64 horses survive save/manifest roundtrip");
+        Check(System.Text.Encoding.UTF8.GetByteCount(manifest)+3<131072,"64 horses fit save file limit");
+        Array overflow=Array.CreateInstance(recordType,65);
+        Array.Copy(mixed,overflow,64); overflow.SetValue(record,64);
+        snapshotType.GetField("horses").SetValue(snapshot,overflow);
+        Check(!(bool)valid.Invoke(null,new[]{snapshot}),"65 horses rejected by shared save/manifest validation");
         snapshotType.GetField("horses").SetValue(snapshot, Array.CreateInstance(recordType, 0));
         Check(((Array)snapshotType.GetField("horses").GetValue(RoundTrip(snapshot))).Length == 0, "empty manifest clears horses");
         Type wireType = mod.GetType("TonyMods.TavernHorse+Wire", true);
